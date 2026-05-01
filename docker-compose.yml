@@ -1,0 +1,29 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      SIMPLE_PASSWORD: "2026"
+      APP_TOKEN: local-token
+      DB_PATH: /app/data/pre-online-tracker.db
+      UPLOAD_DIR: /app/uploads
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - backend-data:/app/data
+      - backend-uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  backend-data:
+  backend-uploads:
