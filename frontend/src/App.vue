@@ -3,8 +3,10 @@ import type { UploadFileInfo } from 'naive-ui'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 type Environment = 'SIT' | 'UAT' | 'Online'
-type Status = '未測試' | 'Pass' | 'Fail'
+type Status = '未測試' | 'Pass' | 'Fail' | 'Fixed' | 'Retest'
 type StatusFilter = Status | 'all'
+type Priority = 'P0' | 'P1' | 'P2' | 'P3'
+type CategoryFilter = string | 'all'
 
 type TestImage = {
   id: number
@@ -13,9 +15,26 @@ type TestImage = {
   created_at: string
 }
 
+type TestHistory = {
+  id: number
+  item_id: number
+  action: string
+  actor: string
+  from_status: Status | null
+  to_status: Status | null
+  note: string
+  changes: string
+  created_at: string
+}
+
 type TestItem = {
   id: number
   environment: Environment
+  module: string
+  feature: string
+  priority: Priority
+  owner: string
+  sort_order: number
   title: string
   scenario: string
   test_method: string
@@ -24,6 +43,7 @@ type TestItem = {
   tester: string
   note: string
   images: TestImage[]
+  history: TestHistory[]
   image_urls: string[]
   image_url: string | null
   tested_at: string | null
@@ -32,6 +52,11 @@ type TestItem = {
 type FormState = {
   id: number | null
   environment: Environment
+  module: string
+  feature: string
+  priority: Priority
+  owner: string
+  sort_order: number
   title: string
   scenario: string
   test_method: string
@@ -44,14 +69,28 @@ type FormState = {
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000'
 const environments: Environment[] = ['SIT', 'UAT', 'Online']
-const statuses: Status[] = ['未測試', 'Pass', 'Fail']
+const statuses: Status[] = ['未測試', 'Fail', 'Fixed', 'Retest', 'Pass']
+const priorities: Priority[] = ['P0', 'P1', 'P2', 'P3']
 const environmentOptions = environments.map((value) => ({ label: value, value }))
 const statusOptions = statuses.map((value) => ({ label: value, value }))
+const priorityOptions = priorities.map((value) => ({ label: value, value }))
 const statusFilterOptions = [{ label: '全部狀態', value: 'all' }, ...statusOptions]
+const sortOptions = [
+  { label: '排序值 / 新到舊', value: 'sort_order' },
+  { label: '優先級', value: 'priority' },
+  { label: '模組', value: 'module' },
+  { label: '負責人', value: 'owner' },
+  { label: '狀態流程', value: 'status' }
+]
 const pageSizeOptions = [5, 10, 20, 50]
 const xlsxHeaders = [
   '編號',
   '環境',
+  '模組',
+  '功能',
+  '優先級',
+  '負責人',
+  '排序',
   '測試項目',
   '測試情境',
   '測試方式',
@@ -73,12 +112,16 @@ const saving = ref(false)
 const error = ref('')
 const uploadFileList = ref<UploadFileInfo[]>([])
 const imagePreviews = ref<string[]>([])
+const importFileInput = ref<HTMLInputElement | null>(null)
 const itemFormOpen = ref(false)
 const detailItem = ref<TestItem | null>(null)
 const currentPage = ref(1)
 const pageSize = ref(10)
 const searchKeyword = ref('')
 const statusFilter = ref<StatusFilter>('all')
+const moduleFilter = ref<CategoryFilter>('all')
+const ownerFilter = ref<CategoryFilter>('all')
+const sortBy = ref('sort_order')
 const itemModalOpen = computed({
   get: () => itemFormOpen.value,
   set: (show: boolean) => {
@@ -96,6 +139,11 @@ const detailModalOpen = computed({
 const emptyForm = (): FormState => ({
   id: null,
   environment: activeEnvironment.value,
+  module: '',
+  feature: '',
+  priority: 'P2',
+  owner: '',
+  sort_order: 0,
   title: '',
   scenario: '',
   test_method: '',
@@ -109,9 +157,25 @@ const emptyForm = (): FormState => ({
 const form = reactive<FormState>(emptyForm())
 
 const environmentItems = computed(() => items.value.filter((item) => item.environment === activeEnvironment.value))
+const moduleOptions = computed(() => [
+  { label: '全部模組', value: 'all' },
+  ...Array.from(new Set(environmentItems.value.map((item) => item.module).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+    .map((value) => ({ label: value, value }))
+])
+const ownerOptions = computed(() => [
+  { label: '全部負責人', value: 'all' },
+  ...Array.from(new Set(environmentItems.value.map((item) => item.owner).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+    .map((value) => ({ label: value, value }))
+])
 const statusFilteredItems = computed(() => {
-  if (statusFilter.value === 'all') return environmentItems.value
-  return environmentItems.value.filter((item) => item.status === statusFilter.value)
+  return environmentItems.value.filter((item) => {
+    const statusMatched = statusFilter.value === 'all' || item.status === statusFilter.value
+    const moduleMatched = moduleFilter.value === 'all' || item.module === moduleFilter.value
+    const ownerMatched = ownerFilter.value === 'all' || item.owner === ownerFilter.value
+    return statusMatched && moduleMatched && ownerMatched
+  })
 })
 const normalizedSearchKeyword = computed(() => searchKeyword.value.trim().toLowerCase())
 const filteredItems = computed(() => {
@@ -120,6 +184,10 @@ const filteredItems = computed(() => {
   return statusFilteredItems.value.filter((item) =>
     [
       item.title,
+      item.module,
+      item.feature,
+      item.priority,
+      item.owner,
       item.scenario,
       item.test_method,
       item.expected_result,
@@ -132,15 +200,26 @@ const filteredItems = computed(() => {
       .includes(normalizedSearchKeyword.value)
   )
 })
-const pageCount = computed(() => Math.max(1, Math.ceil(filteredItems.value.length / pageSize.value)))
+const sortedItems = computed(() => {
+  const statusRank: Record<Status, number> = { 未測試: 0, Fail: 1, Fixed: 2, Retest: 3, Pass: 4 }
+  const priorityRank: Record<Priority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
+  return [...filteredItems.value].sort((a, b) => {
+    if (sortBy.value === 'priority') return priorityRank[a.priority] - priorityRank[b.priority] || a.sort_order - b.sort_order
+    if (sortBy.value === 'module') return a.module.localeCompare(b.module, 'zh-Hant') || a.sort_order - b.sort_order
+    if (sortBy.value === 'owner') return a.owner.localeCompare(b.owner, 'zh-Hant') || a.sort_order - b.sort_order
+    if (sortBy.value === 'status') return statusRank[a.status] - statusRank[b.status] || a.sort_order - b.sort_order
+    return a.sort_order - b.sort_order || b.id - a.id
+  })
+})
+const pageCount = computed(() => Math.max(1, Math.ceil(sortedItems.value.length / pageSize.value)))
 const paginatedItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
-  return filteredItems.value.slice(start, start + pageSize.value)
+  return sortedItems.value.slice(start, start + pageSize.value)
 })
 const paginationRange = computed(() => {
-  if (filteredItems.value.length === 0) return { start: 0, end: 0 }
+  if (sortedItems.value.length === 0) return { start: 0, end: 0 }
   const start = (currentPage.value - 1) * pageSize.value + 1
-  const end = Math.min(start + pageSize.value - 1, filteredItems.value.length)
+  const end = Math.min(start + pageSize.value - 1, sortedItems.value.length)
   return { start, end }
 })
 
@@ -149,10 +228,12 @@ const stats = computed(() =>
     const scoped = items.value.filter((item) => item.environment === environment)
     const pass = scoped.filter((item) => item.status === 'Pass').length
     const fail = scoped.filter((item) => item.status === 'Fail').length
+    const fixed = scoped.filter((item) => item.status === 'Fixed').length
+    const retest = scoped.filter((item) => item.status === 'Retest').length
     const untested = scoped.filter((item) => item.status === '未測試').length
-    const completed = pass + fail
+    const completed = pass + fail + fixed + retest
     const rate = scoped.length === 0 ? 0 : Math.round((completed / scoped.length) * 100)
-    return { environment, total: scoped.length, pass, fail, untested, rate }
+    return { environment, total: scoped.length, pass, fail, fixed, retest, untested, rate }
   })
 )
 
@@ -287,6 +368,11 @@ function buildWorksheetXml(exportItems: TestItem[]) {
     ...exportItems.map((item, index) => [
       index + 1,
       item.environment,
+      item.module,
+      item.feature,
+      item.priority,
+      item.owner,
+      item.sort_order,
       item.title,
       item.scenario,
       item.test_method,
@@ -318,10 +404,12 @@ function buildWorksheetXml(exportItems: TestItem[]) {
   <cols>
     <col min="1" max="1" width="8" customWidth="1"/>
     <col min="2" max="2" width="12" customWidth="1"/>
-    <col min="3" max="6" width="28" customWidth="1"/>
-    <col min="7" max="8" width="14" customWidth="1"/>
-    <col min="9" max="9" width="28" customWidth="1"/>
-    <col min="10" max="10" width="20" customWidth="1"/>
+    <col min="3" max="6" width="14" customWidth="1"/>
+    <col min="7" max="7" width="10" customWidth="1"/>
+    <col min="8" max="11" width="28" customWidth="1"/>
+    <col min="12" max="13" width="14" customWidth="1"/>
+    <col min="14" max="14" width="28" customWidth="1"/>
+    <col min="15" max="15" width="20" customWidth="1"/>
   </cols>
   <sheetData>${sheetData}</sheetData>
 </worksheet>`
@@ -404,7 +492,7 @@ function buildXlsxBlob(exportItems: TestItem[]) {
 }
 
 function exportXlsx() {
-  const blob = buildXlsxBlob(filteredItems.value)
+  const blob = buildXlsxBlob(sortedItems.value)
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -414,6 +502,164 @@ function exportXlsx() {
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
+}
+
+function csvEscape(value: unknown) {
+  const text = String(value ?? '')
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+function buildExportRows(exportItems: TestItem[]) {
+  return [
+    [...xlsxHeaders],
+    ...exportItems.map((item, index) => [
+      index + 1,
+      item.environment,
+      item.module,
+      item.feature,
+      item.priority,
+      item.owner,
+      item.sort_order,
+      item.title,
+      item.scenario,
+      item.test_method,
+      item.expected_result,
+      item.status,
+      item.tester,
+      item.note,
+      formatExportDate(item.tested_at)
+    ])
+  ]
+}
+
+function exportCsv() {
+  const csv = buildExportRows(sortedItems.value).map((row) => row.map(csvEscape).join(',')).join('\r\n')
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  link.href = url
+  link.download = `${activeEnvironment.value}-測試清單-${date}.csv`
+  document.body.append(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
+  let inQuotes = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    const next = text[index + 1]
+    if (char === '"' && inQuotes && next === '"') {
+      cell += '"'
+      index += 1
+    } else if (char === '"') {
+      inQuotes = !inQuotes
+    } else if (char === ',' && !inQuotes) {
+      row.push(cell)
+      cell = ''
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && next === '\n') index += 1
+      row.push(cell)
+      rows.push(row)
+      row = []
+      cell = ''
+    } else {
+      cell += char
+    }
+  }
+  if (cell || row.length > 0) {
+    row.push(cell)
+    rows.push(row)
+  }
+  return rows.filter((csvRow) => csvRow.some((value) => value.trim()))
+}
+
+function normalizeHeader(header: string) {
+  return header.trim().replace(/^\uFEFF/, '')
+}
+
+function parseStatus(value: string): Status {
+  return statuses.includes(value.trim() as Status) ? (value.trim() as Status) : '未測試'
+}
+
+function parsePriority(value: string): Priority {
+  return priorities.includes(value.trim() as Priority) ? (value.trim() as Priority) : 'P2'
+}
+
+async function importCsvFile(file: File) {
+  const rows = parseCsv(await file.text())
+  const [headerRow, ...dataRows] = rows
+  if (!headerRow || dataRows.length === 0) {
+    error.value = 'CSV 沒有可匯入的資料'
+    return
+  }
+  const headerIndex = new Map(headerRow.map((header, index) => [normalizeHeader(header), index]))
+  const read = (row: string[], names: string[], fallback = '') => {
+    for (const name of names) {
+      const index = headerIndex.get(name)
+      if (index !== undefined) return row[index]?.trim() ?? fallback
+    }
+    return fallback
+  }
+  const importedItems = dataRows
+    .map((row, index) => ({
+      environment: read(row, ['環境'], activeEnvironment.value),
+      module: read(row, ['模組']),
+      feature: read(row, ['功能']),
+      priority: parsePriority(read(row, ['優先級'])),
+      owner: read(row, ['負責人']),
+      sort_order: Number(read(row, ['排序'], String(index + 1))) || index + 1,
+      title: read(row, ['測試項目', '標題', 'Title']),
+      scenario: read(row, ['測試情境', '測試情境說明']),
+      test_method: read(row, ['測試方式']),
+      expected_result: read(row, ['預期結果']),
+      status: parseStatus(read(row, ['狀態'])),
+      tester: read(row, ['測試人員']),
+      note: read(row, ['備註'])
+    }))
+    .filter((item) => item.title)
+
+  if (importedItems.length === 0) {
+    error.value = 'CSV 找不到測試項目欄位或內容'
+    return
+  }
+
+  const response = await fetch(`${apiBaseUrl}/api/items/import`, {
+    method: 'POST',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items: importedItems })
+  })
+  if (!response.ok) throw new Error('匯入失敗')
+  await loadItems()
+}
+
+function triggerImport() {
+  importFileInput.value?.click()
+}
+
+async function handleImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    error.value = '目前支援匯入 CSV；可從 Excel 另存 CSV 後匯入'
+    return
+  }
+  loading.value = true
+  error.value = ''
+  try {
+    await importCsvFile(file)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '匯入失敗'
+  } finally {
+    loading.value = false
+  }
 }
 
 function imageName(path: string) {
@@ -506,6 +752,11 @@ function editItem(item: TestItem) {
   Object.assign(form, {
     id: item.id,
     environment: item.environment,
+    module: item.module,
+    feature: item.feature,
+    priority: item.priority,
+    owner: item.owner,
+    sort_order: item.sort_order,
     title: item.title,
     scenario: item.scenario,
     test_method: item.test_method,
@@ -537,6 +788,11 @@ function handleUploadChange(options: { fileList: UploadFileInfo[] }) {
 function buildFormData() {
   const data = new FormData()
   data.set('environment', form.environment)
+  data.set('module', form.module)
+  data.set('feature', form.feature)
+  data.set('priority', form.priority)
+  data.set('owner', form.owner)
+  data.set('sort_order', String(form.sort_order))
   data.set('title', form.title)
   data.set('scenario', form.scenario)
   data.set('test_method', form.test_method)
@@ -581,6 +837,11 @@ async function saveItem() {
 async function updateStatus(item: TestItem, status: Status) {
   const data = new FormData()
   data.set('environment', item.environment)
+  data.set('module', item.module)
+  data.set('feature', item.feature)
+  data.set('priority', item.priority)
+  data.set('owner', item.owner)
+  data.set('sort_order', String(item.sort_order))
   data.set('title', item.title)
   data.set('scenario', item.scenario)
   data.set('test_method', item.test_method)
@@ -626,7 +887,29 @@ function openEnvironment(environment: Environment) {
 function statusType(status: Status) {
   if (status === 'Pass') return 'success'
   if (status === 'Fail') return 'error'
+  if (status === 'Fixed' || status === 'Retest') return 'warning'
   return 'default'
+}
+
+function historyActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    created: '建立',
+    imported: '匯入',
+    updated: '更新',
+    status_changed: '狀態變更'
+  }
+  return labels[action] ?? action
+}
+
+function formatHistoryTime(value: string) {
+  return formatExportDate(value)
+}
+
+function historySummary(history: TestHistory) {
+  if (history.from_status || history.to_status) {
+    return `${history.from_status ?? '-'} -> ${history.to_status ?? '-'}`
+  }
+  return history.note || '欄位內容已更新'
 }
 
 watch(activeEnvironment, () => {
@@ -638,6 +921,18 @@ watch(searchKeyword, () => {
 })
 
 watch(statusFilter, () => {
+  currentPage.value = 1
+})
+
+watch(moduleFilter, () => {
+  currentPage.value = 1
+})
+
+watch(ownerFilter, () => {
+  currentPage.value = 1
+})
+
+watch(sortBy, () => {
   currentPage.value = 1
 })
 
@@ -714,7 +1009,8 @@ onMounted(loadItems)
                 <span>{{ stat.environment }}</span>
                 <strong>{{ stat.rate }}%</strong>
                 <small>
-                  總數 {{ stat.total }} / Pass {{ stat.pass }} / Fail {{ stat.fail }} / 未測試 {{ stat.untested }}
+                  總數 {{ stat.total }} / Pass {{ stat.pass }} / Fail {{ stat.fail }} / Fixed {{ stat.fixed }} /
+                  Retest {{ stat.retest }} / 未測試 {{ stat.untested }}
                 </small>
               </n-space>
             </n-card>
@@ -737,16 +1033,44 @@ onMounted(loadItems)
                   :options="statusFilterOptions"
                   class="status-filter"
                 />
+                <n-select
+                  v-model:value="moduleFilter"
+                  :options="moduleOptions"
+                  class="status-filter"
+                />
+                <n-select
+                  v-model:value="ownerFilter"
+                  :options="ownerOptions"
+                  class="status-filter"
+                />
+                <n-select
+                  v-model:value="sortBy"
+                  :options="sortOptions"
+                  class="sort-select"
+                />
                 <n-button type="primary" @click="openCreateItem">新增測試項目</n-button>
-                <n-button secondary :disabled="filteredItems.length === 0" @click="exportXlsx">匯出 XLSX</n-button>
+                <n-button secondary @click="triggerImport">匯入 CSV</n-button>
+                <n-button secondary :disabled="sortedItems.length === 0" @click="exportCsv">匯出 CSV</n-button>
+                <n-button secondary :disabled="sortedItems.length === 0" @click="exportXlsx">匯出 XLSX</n-button>
                 <n-button secondary :loading="loading" @click="loadItems">重新整理</n-button>
               </n-space>
+              <input
+                ref="importFileInput"
+                class="file-input"
+                type="file"
+                accept=".csv,text/csv"
+                @change="handleImportFile"
+              />
             </template>
+
+            <n-alert v-if="error" type="error" class="form-alert">{{ error }}</n-alert>
 
             <div class="table-wrap">
               <n-table :bordered="false" :single-line="false">
                 <thead>
                   <tr>
+                    <th>分類</th>
+                    <th>優先級</th>
                     <th>測試項目</th>
                     <th>測試方式</th>
                     <th>預期結果</th>
@@ -759,6 +1083,16 @@ onMounted(loadItems)
                 </thead>
                 <tbody>
                   <tr v-for="item in paginatedItems" :key="item.id">
+                    <td>
+                      <strong>{{ item.module || '-' }}</strong>
+                      <small>{{ item.feature || '-' }}</small>
+                    </td>
+                    <td>
+                      <n-tag size="small" :type="item.priority === 'P0' || item.priority === 'P1' ? 'error' : 'default'">
+                        {{ item.priority }}
+                      </n-tag>
+                      <small>#{{ item.sort_order }}</small>
+                    </td>
                     <td>
                       <strong>{{ item.title }}</strong>
                       <small>{{ item.scenario }}</small>
@@ -790,7 +1124,7 @@ onMounted(loadItems)
                     </td>
                   </tr>
                   <tr v-if="filteredItems.length === 0">
-                    <td colspan="8" class="empty-state">
+                    <td colspan="10" class="empty-state">
                       {{ environmentItems.length === 0 ? '尚無測試項目' : '找不到符合篩選條件的測試項目' }}
                     </td>
                   </tr>
@@ -822,6 +1156,27 @@ onMounted(loadItems)
               </n-form-item-gi>
               <n-form-item-gi label="狀態">
                 <n-select v-model:value="form.status" :options="statusOptions" />
+              </n-form-item-gi>
+            </n-grid>
+
+            <n-grid :cols="2" :x-gap="12" responsive="screen">
+              <n-form-item-gi label="模組">
+                <n-input v-model:value="form.module" placeholder="例如：工單" />
+              </n-form-item-gi>
+              <n-form-item-gi label="功能">
+                <n-input v-model:value="form.feature" placeholder="例如：入戶流程" />
+              </n-form-item-gi>
+            </n-grid>
+
+            <n-grid :cols="3" :x-gap="12" responsive="screen">
+              <n-form-item-gi label="優先級">
+                <n-select v-model:value="form.priority" :options="priorityOptions" />
+              </n-form-item-gi>
+              <n-form-item-gi label="負責人">
+                <n-input v-model:value="form.owner" placeholder="負責修正或追蹤的人" />
+              </n-form-item-gi>
+              <n-form-item-gi label="排序">
+                <n-input-number v-model:value="form.sort_order" :min="0" />
               </n-form-item-gi>
             </n-grid>
 
@@ -897,10 +1252,17 @@ onMounted(loadItems)
             <n-space>
               <n-tag>{{ detailItem.environment }}</n-tag>
               <n-tag :type="statusType(detailItem.status)">{{ detailItem.status }}</n-tag>
+              <n-tag>{{ detailItem.priority }}</n-tag>
               <n-tag>{{ detailItem.images.length }} 張圖片</n-tag>
             </n-space>
 
             <n-descriptions bordered :column="1" size="small">
+              <n-descriptions-item label="模組 / 功能">
+                {{ detailItem.module || '-' }} / {{ detailItem.feature || '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item label="負責人 / 排序">
+                {{ detailItem.owner || '-' }} / #{{ detailItem.sort_order }}
+              </n-descriptions-item>
               <n-descriptions-item label="測試情境">{{ detailItem.scenario || '-' }}</n-descriptions-item>
               <n-descriptions-item label="測試方式">{{ detailItem.test_method || '-' }}</n-descriptions-item>
               <n-descriptions-item label="預期結果">{{ detailItem.expected_result || '-' }}</n-descriptions-item>
@@ -920,6 +1282,21 @@ onMounted(loadItems)
               </a>
             </div>
             <n-empty v-else description="尚未上傳圖片" />
+
+            <div>
+              <h2 class="history-heading">測試紀錄歷程</h2>
+              <n-timeline v-if="detailItem.history.length > 0">
+                <n-timeline-item
+                  v-for="history in detailItem.history"
+                  :key="history.id"
+                  :type="history.to_status ? statusType(history.to_status) : 'default'"
+                  :title="historyActionLabel(history.action)"
+                  :content="historySummary(history)"
+                  :time="`${formatHistoryTime(history.created_at)}${history.actor ? ` / ${history.actor}` : ''}`"
+                />
+              </n-timeline>
+              <n-empty v-else description="尚無歷程" />
+            </div>
           </n-space>
         </n-modal>
       </main>
