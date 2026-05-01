@@ -1149,95 +1149,101 @@ onMounted(loadItems)
         </section>
 
         <n-modal v-model:show="itemModalOpen" preset="card" class="item-modal" :title="form.id ? '編輯測試項目' : '新增測試項目'">
-          <n-form label-placement="top" @submit.prevent="saveItem">
-            <n-grid :cols="2" :x-gap="12" responsive="screen">
-              <n-form-item-gi label="測試環境">
-                <n-select v-model:value="form.environment" :options="environmentOptions" />
-              </n-form-item-gi>
-              <n-form-item-gi label="狀態">
-                <n-select v-model:value="form.status" :options="statusOptions" />
-              </n-form-item-gi>
-            </n-grid>
+          <n-form class="item-form" label-placement="top" @submit.prevent="saveItem">
+            <div class="item-form-grid">
+              <div class="form-column">
+                <n-grid :cols="2" :x-gap="12" responsive="screen">
+                  <n-form-item-gi label="測試環境">
+                    <n-select v-model:value="form.environment" :options="environmentOptions" />
+                  </n-form-item-gi>
+                  <n-form-item-gi label="狀態">
+                    <n-select v-model:value="form.status" :options="statusOptions" />
+                  </n-form-item-gi>
+                </n-grid>
 
-            <n-grid :cols="2" :x-gap="12" responsive="screen">
-              <n-form-item-gi label="模組">
-                <n-input v-model:value="form.module" placeholder="例如：工單" />
-              </n-form-item-gi>
-              <n-form-item-gi label="功能">
-                <n-input v-model:value="form.feature" placeholder="例如：入戶流程" />
-              </n-form-item-gi>
-            </n-grid>
+                <n-form-item label="測試項目">
+                  <n-input v-model:value="form.title" placeholder="例如：入戶照片上傳" />
+                </n-form-item>
 
-            <n-grid :cols="3" :x-gap="12" responsive="screen">
-              <n-form-item-gi label="優先級">
-                <n-select v-model:value="form.priority" :options="priorityOptions" />
-              </n-form-item-gi>
-              <n-form-item-gi label="負責人">
-                <n-input v-model:value="form.owner" placeholder="負責修正或追蹤的人" />
-              </n-form-item-gi>
-              <n-form-item-gi label="排序">
-                <n-input-number v-model:value="form.sort_order" :min="0" />
-              </n-form-item-gi>
-            </n-grid>
+                <n-form-item label="測試情境說明">
+                  <n-input
+                    v-model:value="form.scenario"
+                    type="textarea"
+                    :autosize="{ minRows: 1, maxRows: 3 }"
+                    placeholder="例如：確認使用者可以從工單進入入戶流程"
+                  />
+                </n-form-item>
 
-            <n-form-item label="測試項目">
-              <n-input v-model:value="form.title" placeholder="例如：入戶照片上傳" />
-            </n-form-item>
+                <n-form-item label="測試方式">
+                  <n-input
+                    v-model:value="form.test_method"
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 4 }"
+                    placeholder="例如：先打開工單，點擊入戶按鈕，再點擊上傳照片"
+                  />
+                </n-form-item>
 
-            <n-form-item label="測試情境說明">
-              <n-input
-                v-model:value="form.scenario"
-                type="textarea"
-                :autosize="{ minRows: 1, maxRows: 3 }"
-                placeholder="例如：確認使用者可以從工單進入入戶流程"
-              />
-            </n-form-item>
+                <n-form-item label="預期結果">
+                  <n-input
+                    v-model:value="form.expected_result"
+                    type="textarea"
+                    :autosize="{ minRows: 1, maxRows: 3 }"
+                    placeholder="例如：照片成功上傳，畫面顯示成功"
+                  />
+                </n-form-item>
+              </div>
 
-            <n-form-item label="測試方式">
-              <n-input
-                v-model:value="form.test_method"
-                type="textarea"
-                :autosize="{ minRows: 2, maxRows: 5 }"
-                placeholder="例如：先打開工單，點擊入戶按鈕，再點擊上傳照片"
-              />
-            </n-form-item>
+              <div class="form-column">
+                <n-grid :cols="2" :x-gap="12" responsive="screen">
+                  <n-form-item-gi label="模組">
+                    <n-input v-model:value="form.module" placeholder="例如：工單" />
+                  </n-form-item-gi>
+                  <n-form-item-gi label="功能">
+                    <n-input v-model:value="form.feature" placeholder="例如：入戶流程" />
+                  </n-form-item-gi>
+                </n-grid>
 
-            <n-form-item label="預期結果">
-              <n-input
-                v-model:value="form.expected_result"
-                type="textarea"
-                :autosize="{ minRows: 1, maxRows: 3 }"
-                placeholder="例如：照片成功上傳，畫面顯示成功"
-              />
-            </n-form-item>
+                <n-grid :cols="3" :x-gap="12" responsive="screen">
+                  <n-form-item-gi label="優先級">
+                    <n-select v-model:value="form.priority" :options="priorityOptions" />
+                  </n-form-item-gi>
+                  <n-form-item-gi label="負責人">
+                    <n-input v-model:value="form.owner" placeholder="負責修正或追蹤的人" />
+                  </n-form-item-gi>
+                  <n-form-item-gi label="排序">
+                    <n-input-number v-model:value="form.sort_order" :min="0" />
+                  </n-form-item-gi>
+                </n-grid>
 
-            <n-form-item label="測試人員">
-              <n-input v-model:value="form.tester" placeholder="測試人員名稱" />
-            </n-form-item>
+                <n-form-item label="測試人員">
+                  <n-input v-model:value="form.tester" placeholder="測試人員名稱" />
+                </n-form-item>
 
-            <n-form-item label="圖片">
-              <n-upload
-                v-model:file-list="uploadFileList"
-                multiple
-                accept="image/*"
-                list-type="image-card"
-                :default-upload="false"
-                @change="handleUploadChange"
-              >
-                選擇圖片
-              </n-upload>
-            </n-form-item>
+                <n-form-item label="圖片">
+                  <n-upload
+                    v-model:file-list="uploadFileList"
+                    multiple
+                    accept="image/*"
+                    list-type="image-card"
+                    :default-upload="false"
+                    @change="handleUploadChange"
+                  >
+                    選擇圖片
+                  </n-upload>
+                </n-form-item>
 
-            <div v-if="form.id" class="form-hint">編輯時新選擇的圖片會追加到原本圖片後面。</div>
+                <div v-if="form.id" class="form-hint">編輯時新選擇的圖片會追加到原本圖片後面。</div>
 
-            <n-form-item label="備註">
-              <n-input
-                v-model:value="form.note"
-                type="textarea"
-                :autosize="{ minRows: 1, maxRows: 4 }"
-                placeholder="失敗原因、補充說明或回報狀態"
-              />
-            </n-form-item>
+                <n-form-item label="備註">
+                  <n-input
+                    v-model:value="form.note"
+                    type="textarea"
+                    :autosize="{ minRows: 1, maxRows: 3 }"
+                    placeholder="失敗原因、補充說明或回報狀態"
+                  />
+                </n-form-item>
+              </div>
+            </div>
 
             <n-alert v-if="error" type="error" class="form-alert">{{ error }}</n-alert>
             <n-space justify="end" class="form-actions">
