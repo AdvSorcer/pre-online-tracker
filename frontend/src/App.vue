@@ -1022,6 +1022,17 @@ onMounted(loadItems)
             <template #header>{{ activeEnvironment }} 測試清單</template>
             <template #header-extra>
               <n-space class="list-toolbar">
+                <n-button-group class="environment-switch">
+                  <n-button
+                    v-for="environment in environments"
+                    :key="environment"
+                    :type="activeEnvironment === environment ? 'primary' : 'default'"
+                    secondary
+                    @click="activeEnvironment = environment"
+                  >
+                    {{ environment }}
+                  </n-button>
+                </n-button-group>
                 <n-input
                   v-model:value="searchKeyword"
                   clearable

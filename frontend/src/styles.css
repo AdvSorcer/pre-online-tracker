@@ -156,6 +156,10 @@ td small {
   width: 100%;
 }
 
+.environment-switch {
+  flex: 0 0 auto;
+}
+
 .search-input {
   width: min(280px, 100%);
 }
@@ -329,11 +333,20 @@ td small {
 
   .list-toolbar .n-space-item,
   .list-toolbar .n-button,
+  .environment-switch,
   .search-input,
   .status-filter,
   .sort-select {
     width: 100%;
     min-width: 0;
+  }
+
+  .environment-switch {
+    display: flex;
+  }
+
+  .environment-switch .n-button {
+    flex: 1;
   }
 
   .item-form-grid {
