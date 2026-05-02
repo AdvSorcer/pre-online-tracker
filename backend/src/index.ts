@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite'
-import { Elysia } from 'elysia'
+import { Elysia, status, t, type Static } from 'elysia'
 import { mkdir } from 'node:fs/promises'
 import { extname } from 'node:path'
 
@@ -166,25 +166,46 @@ type TestItemHistory = {
   created_at: string
 }
 
-type ItemInput = {
-  environment?: string
-  module?: string
-  feature?: string
-  priority?: string
-  owner?: string
-  sort_order?: string | number
-  title?: string
-  scenario?: string
-  test_method?: string
-  expected_result?: string
-  status?: string
-  tester?: string
-  note?: string
-}
+const environmentSet = new Set<string>(['SIT', 'UAT', 'Online'])
 
-const environments = new Set(['SIT', 'UAT', 'Online'])
-const statuses = new Set(['未測試', 'Pass', 'Fail', 'Fixed', 'Retest'])
-const priorities = new Set(['P0', 'P1', 'P2', 'P3'])
+const environmentSchema = t.Union([t.Literal('SIT'), t.Literal('UAT'), t.Literal('Online')])
+const statusSchema = t.Union([
+  t.Literal('未測試'),
+  t.Literal('Pass'),
+  t.Literal('Fail'),
+  t.Literal('Fixed'),
+  t.Literal('Retest')
+])
+const prioritySchema = t.Union([t.Literal('P0'), t.Literal('P1'), t.Literal('P2'), t.Literal('P3')])
+const itemIdParamsSchema = t.Object({ id: t.Numeric() })
+const itemInputSchema = {
+  environment: environmentSchema,
+  module: t.Optional(t.String()),
+  feature: t.Optional(t.String()),
+  priority: t.Optional(prioritySchema),
+  owner: t.Optional(t.String()),
+  sort_order: t.Optional(t.Numeric()),
+  title: t.String({ minLength: 1 }),
+  scenario: t.Optional(t.String()),
+  test_method: t.Optional(t.String()),
+  expected_result: t.Optional(t.String()),
+  status: t.Optional(statusSchema),
+  tester: t.Optional(t.String()),
+  note: t.Optional(t.String())
+} as const
+const createItemBodySchema = t.Object({
+  ...itemInputSchema,
+  image: t.Optional(t.File({ type: 'image/*' })),
+  images: t.Optional(t.Files({ type: 'image/*' }))
+})
+const updateItemBodySchema = t.Partial(createItemBodySchema)
+const importItemsBodySchema = t.Object({
+  items: t.Array(t.Object(itemInputSchema)),
+  actor: t.Optional(t.String())
+})
+
+type ItemInput = Partial<Omit<Static<typeof createItemBodySchema>, 'image' | 'images'>>
+type ItemPayload = Static<typeof createItemBodySchema> | Static<typeof updateItemBodySchema>
 
 function corsHeaders() {
   return {
@@ -194,43 +215,19 @@ function corsHeaders() {
   }
 }
 
-function requireAuth(headers: Record<string, string | undefined>) {
+function requireAuth({ headers }: { headers: Record<string, string | undefined> }) {
   const authorization = headers.authorization ?? ''
   if (authorization !== `Bearer ${appToken}`) {
-    throw new Response('Unauthorized', { status: 401, headers: corsHeaders() })
+    return status(401, 'Unauthorized')
   }
 }
 
 function normalizeInput(input: ItemInput, partial = false) {
   const title = input.title?.trim()
   const environment = input.environment?.trim()
-  const status = input.status?.trim()
+  const itemStatus = input.status?.trim()
   const priority = input.priority?.trim()
   const sortOrder = input.sort_order === undefined ? undefined : Number(input.sort_order)
-
-  if (!partial || environment !== undefined) {
-    if (!environment || !environments.has(environment)) {
-      throw new Response('Invalid environment', { status: 400, headers: corsHeaders() })
-    }
-  }
-
-  if (!partial || title !== undefined) {
-    if (!title) {
-      throw new Response('Title is required', { status: 400, headers: corsHeaders() })
-    }
-  }
-
-  if (status !== undefined && !statuses.has(status)) {
-    throw new Response('Invalid status', { status: 400, headers: corsHeaders() })
-  }
-
-  if (priority !== undefined && !priorities.has(priority)) {
-    throw new Response('Invalid priority', { status: 400, headers: corsHeaders() })
-  }
-
-  if (sortOrder !== undefined && !Number.isFinite(sortOrder)) {
-    throw new Response('Invalid sort order', { status: 400, headers: corsHeaders() })
-  }
 
   return {
     environment,
@@ -243,7 +240,7 @@ function normalizeInput(input: ItemInput, partial = false) {
     scenario: input.scenario?.trim() ?? (partial ? undefined : ''),
     test_method: input.test_method?.trim() ?? (partial ? undefined : ''),
     expected_result: input.expected_result?.trim() ?? (partial ? undefined : ''),
-    status: status ?? (partial ? undefined : '未測試'),
+    status: itemStatus ?? (partial ? undefined : '未測試'),
     tester: input.tester?.trim() ?? (partial ? undefined : ''),
     note: input.note?.trim() ?? (partial ? undefined : '')
   }
@@ -255,7 +252,7 @@ async function saveImage(image: unknown) {
   }
 
   if (!image.type.startsWith('image/')) {
-    throw new Response('Only image uploads are allowed', { status: 400, headers: corsHeaders() })
+    throw status(400, 'Only image uploads are allowed')
   }
 
   const extension = extname(image.name) || '.jpg'
@@ -265,15 +262,14 @@ async function saveImage(image: unknown) {
   return `/uploads/${safeName}`
 }
 
-function collectImages(payload: { image?: unknown; images?: unknown }) {
+function collectImages(payload: ItemPayload) {
   const images = payload.images
   if (Array.isArray(images)) return images
-  if (images instanceof File) return [images]
   if (payload.image instanceof File) return [payload.image]
   return []
 }
 
-async function saveImages(payload: { image?: unknown; images?: unknown }) {
+async function saveImages(payload: ItemPayload) {
   const saved = []
   for (const image of collectImages(payload)) {
     const imagePath = await saveImage(image)
@@ -358,195 +354,246 @@ function changedFields(before: TestItem, after: TestItem) {
 }
 
 const app = new Elysia()
-  .onRequest(({ request, set }) => {
-    Object.assign(set.headers, corsHeaders())
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders() })
+  .headers(corsHeaders())
+  .onError(({ code }) => {
+    if (code === 'VALIDATION') {
+      return status(400, 'Invalid request')
     }
   })
-  .post('/api/login', ({ body }) => {
-    const payload = body as { password?: string }
-    if (payload.password !== password) {
-      throw new Response('Invalid password', { status: 401, headers: corsHeaders() })
-    }
-    return { token: appToken }
+  .options('/*', ({ set }) => {
+    set.status = 204
   })
-  .get('/api/items', ({ headers, query }) => {
-    requireAuth(headers)
-    const environment = typeof query.environment === 'string' ? query.environment : undefined
-    const items =
-      environment && environments.has(environment)
-        ? db
-            .query<TestItem, [string]>('SELECT * FROM test_items WHERE environment = ? ORDER BY sort_order ASC, id DESC')
-            .all(environment)
-        : db.query<TestItem, []>('SELECT * FROM test_items ORDER BY environment ASC, sort_order ASC, id DESC').all()
-    return items.map(mapItem)
-  })
-  .post('/api/items', async ({ headers, body }) => {
-    requireAuth(headers)
-    const payload = body as ItemInput & { image?: unknown; images?: unknown }
-    const input = normalizeInput(payload)
-    const imagePaths = await saveImages(payload)
-    const testedAt = input.status === '未測試' ? null : new Date().toISOString()
-
-    const result = db
-      .query(
-        `INSERT INTO test_items
-          (environment, module, feature, priority, owner, sort_order, title, scenario, test_method, expected_result, status, tester, note, image_path, tested_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-      )
-      .run(
-        input.environment!,
-        input.module!,
-        input.feature!,
-        input.priority!,
-        input.owner!,
-        input.sort_order!,
-        input.title!,
-        input.scenario!,
-        input.test_method!,
-        input.expected_result!,
-        input.status!,
-        input.tester!,
-        input.note!,
-        imagePaths[0] ?? null,
-        testedAt
-      )
-
-    const itemId = Number(result.lastInsertRowid)
-    insertImages(itemId, imagePaths)
-    addHistory(itemId, 'created', input.tester, { toStatus: input.status, note: input.note })
-    const item = db.query<TestItem, [number]>('SELECT * FROM test_items WHERE id = ?').get(itemId)
-    return mapItem(item!)
-  })
-  .post('/api/items/import', ({ headers, body }) => {
-    requireAuth(headers)
-    const payload = body as { items?: ItemInput[]; actor?: string }
-    if (!Array.isArray(payload.items)) {
-      throw new Response('Invalid import payload', { status: 400, headers: corsHeaders() })
-    }
-
-    const insert = db.query(
-      `INSERT INTO test_items
-        (environment, module, feature, priority, owner, sort_order, title, scenario, test_method, expected_result, status, tester, note, tested_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-    )
-    let imported = 0
-    db.transaction(() => {
-      for (const rawItem of payload.items ?? []) {
-        const input = normalizeInput(rawItem)
-        const testedAt = input.status === '未測試' ? null : new Date().toISOString()
-        const result = insert.run(
-          input.environment!,
-          input.module!,
-          input.feature!,
-          input.priority!,
-          input.owner!,
-          input.sort_order!,
-          input.title!,
-          input.scenario!,
-          input.test_method!,
-          input.expected_result!,
-          input.status!,
-          input.tester!,
-          input.note!,
-          testedAt
-        )
-        imported += 1
-        addHistory(Number(result.lastInsertRowid), 'imported', payload.actor ?? input.tester, {
-          toStatus: input.status,
-          note: input.note
-        })
+  .post(
+    '/api/login',
+    ({ body }) => {
+      if (body.password !== password) {
+        return status(401, 'Invalid password')
       }
-    })()
-
-    return { imported }
-  })
-  .put('/api/items/:id', async ({ headers, params, body }) => {
-    requireAuth(headers)
-    const id = Number(params.id)
-    const existing = db.query<TestItem, [number]>('SELECT * FROM test_items WHERE id = ?').get(id)
-    if (!existing) {
-      throw new Response('Not found', { status: 404, headers: corsHeaders() })
-    }
-
-    const payload = body as ItemInput & { image?: unknown; images?: unknown }
-    const input = normalizeInput(payload, true)
-    const newImagePaths = await saveImages(payload)
-    if (newImagePaths.length > 0) {
-      insertImages(id, newImagePaths)
-    }
-    const images = getImages(id)
-    const firstImagePath = images[0]?.path ?? newImagePaths[0] ?? existing.image_path
-    const nextStatus = input.status ?? existing.status
-    const testedAt = nextStatus === '未測試' ? null : new Date().toISOString()
-
-    db.query(
-      `UPDATE test_items SET
-        environment = ?,
-        module = ?,
-        feature = ?,
-        priority = ?,
-        owner = ?,
-        sort_order = ?,
-        title = ?,
-        scenario = ?,
-        test_method = ?,
-        expected_result = ?,
-        status = ?,
-        tester = ?,
-        note = ?,
-        image_path = ?,
-        tested_at = ?,
-        updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(
-      input.environment ?? existing.environment,
-      input.module ?? existing.module,
-      input.feature ?? existing.feature,
-      input.priority ?? existing.priority,
-      input.owner ?? existing.owner,
-      input.sort_order ?? existing.sort_order,
-      input.title ?? existing.title,
-      input.scenario ?? existing.scenario,
-      input.test_method ?? existing.test_method,
-      input.expected_result ?? existing.expected_result,
-      input.status ?? existing.status,
-      input.tester ?? existing.tester,
-      input.note ?? existing.note,
-      firstImagePath,
-      testedAt,
-      id
-    )
-
-    const item = db.query<TestItem, [number]>('SELECT * FROM test_items WHERE id = ?').get(id)
-    const changes = changedFields(existing, item!)
-    if (Object.keys(changes).length > 0 || newImagePaths.length > 0) {
-      addHistory(id, existing.status !== item!.status ? 'status_changed' : 'updated', item!.tester, {
-        fromStatus: existing.status,
-        toStatus: item!.status,
-        note: item!.note,
-        changes: newImagePaths.length > 0 ? { ...changes, images_added: newImagePaths.length } : changes
+      return { token: appToken }
+    },
+    {
+      body: t.Object({
+        password: t.String()
       })
     }
-    return mapItem(item!)
-  })
-  .get('/api/items/:id/history', ({ headers, params }) => {
-    requireAuth(headers)
-    return getHistory(Number(params.id))
-  })
-  .delete('/api/items/:id', ({ headers, params }) => {
-    requireAuth(headers)
-    db.query('DELETE FROM test_items WHERE id = ?').run(Number(params.id))
-    return { ok: true }
-  })
-  .get('/uploads/:file', ({ params }) => {
-    const file = Bun.file(`${uploadDir}/${params.file}`)
-    if (!file.size) {
-      throw new Response('Not found', { status: 404, headers: corsHeaders() })
-    }
-    return file
-  })
+  )
+  .group('/api/items', (items) =>
+    items.guard({ beforeHandle: requireAuth }, (items) =>
+      items
+        .get(
+          '/',
+          ({ query }) => {
+            const items =
+              query.environment && environmentSet.has(query.environment)
+                ? db
+                    .query<TestItem, [string]>(
+                      'SELECT * FROM test_items WHERE environment = ? ORDER BY sort_order ASC, id DESC'
+                    )
+                    .all(query.environment)
+                : db.query<TestItem, []>('SELECT * FROM test_items ORDER BY environment ASC, sort_order ASC, id DESC').all()
+            return items.map(mapItem)
+          },
+          {
+            query: t.Object({
+              environment: t.Optional(environmentSchema)
+            })
+          }
+        )
+        .post(
+          '/',
+          async ({ body }) => {
+            const input = normalizeInput(body)
+            const imagePaths = await saveImages(body)
+            const testedAt = input.status === '未測試' ? null : new Date().toISOString()
+
+            const result = db
+              .query(
+                `INSERT INTO test_items
+                  (environment, module, feature, priority, owner, sort_order, title, scenario, test_method, expected_result, status, tester, note, image_path, tested_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+              )
+              .run(
+                input.environment!,
+                input.module!,
+                input.feature!,
+                input.priority!,
+                input.owner!,
+                input.sort_order!,
+                input.title!,
+                input.scenario!,
+                input.test_method!,
+                input.expected_result!,
+                input.status!,
+                input.tester!,
+                input.note!,
+                imagePaths[0] ?? null,
+                testedAt
+              )
+
+            const itemId = Number(result.lastInsertRowid)
+            insertImages(itemId, imagePaths)
+            addHistory(itemId, 'created', input.tester, { toStatus: input.status, note: input.note })
+            const item = db.query<TestItem, [number]>('SELECT * FROM test_items WHERE id = ?').get(itemId)
+            return mapItem(item!)
+          },
+          {
+            body: createItemBodySchema
+          }
+        )
+        .post(
+          '/import',
+          ({ body }) => {
+            const insert = db.query(
+              `INSERT INTO test_items
+                (environment, module, feature, priority, owner, sort_order, title, scenario, test_method, expected_result, status, tester, note, tested_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+            )
+            let imported = 0
+            db.transaction(() => {
+              for (const rawItem of body.items) {
+                const input = normalizeInput(rawItem)
+                const testedAt = input.status === '未測試' ? null : new Date().toISOString()
+                const result = insert.run(
+                  input.environment!,
+                  input.module!,
+                  input.feature!,
+                  input.priority!,
+                  input.owner!,
+                  input.sort_order!,
+                  input.title!,
+                  input.scenario!,
+                  input.test_method!,
+                  input.expected_result!,
+                  input.status!,
+                  input.tester!,
+                  input.note!,
+                  testedAt
+                )
+                imported += 1
+                addHistory(Number(result.lastInsertRowid), 'imported', body.actor ?? input.tester, {
+                  toStatus: input.status,
+                  note: input.note
+                })
+              }
+            })()
+
+            return { imported }
+          },
+          {
+            body: importItemsBodySchema
+          }
+        )
+        .put(
+          '/:id',
+          async ({ params, body }) => {
+            const existing = db.query<TestItem, [number]>('SELECT * FROM test_items WHERE id = ?').get(params.id)
+            if (!existing) {
+              return status(404, 'Not found')
+            }
+
+            const input = normalizeInput(body, true)
+            const newImagePaths = await saveImages(body)
+            if (newImagePaths.length > 0) {
+              insertImages(params.id, newImagePaths)
+            }
+            const images = getImages(params.id)
+            const firstImagePath = images[0]?.path ?? newImagePaths[0] ?? existing.image_path
+            const statusChanged = input.status !== undefined && input.status !== existing.status
+            const testedAt = statusChanged ? (input.status === '未測試' ? null : new Date().toISOString()) : existing.tested_at
+
+            db.query(
+              `UPDATE test_items SET
+                environment = ?,
+                module = ?,
+                feature = ?,
+                priority = ?,
+                owner = ?,
+                sort_order = ?,
+                title = ?,
+                scenario = ?,
+                test_method = ?,
+                expected_result = ?,
+                status = ?,
+                tester = ?,
+                note = ?,
+                image_path = ?,
+                tested_at = ?,
+                updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?`
+            ).run(
+              input.environment ?? existing.environment,
+              input.module ?? existing.module,
+              input.feature ?? existing.feature,
+              input.priority ?? existing.priority,
+              input.owner ?? existing.owner,
+              input.sort_order ?? existing.sort_order,
+              input.title ?? existing.title,
+              input.scenario ?? existing.scenario,
+              input.test_method ?? existing.test_method,
+              input.expected_result ?? existing.expected_result,
+              input.status ?? existing.status,
+              input.tester ?? existing.tester,
+              input.note ?? existing.note,
+              firstImagePath,
+              testedAt,
+              params.id
+            )
+
+            const item = db.query<TestItem, [number]>('SELECT * FROM test_items WHERE id = ?').get(params.id)
+            const changes = changedFields(existing, item!)
+            if (Object.keys(changes).length > 0 || newImagePaths.length > 0) {
+              addHistory(params.id, existing.status !== item!.status ? 'status_changed' : 'updated', item!.tester, {
+                fromStatus: existing.status,
+                toStatus: item!.status,
+                note: item!.note,
+                changes: newImagePaths.length > 0 ? { ...changes, images_added: newImagePaths.length } : changes
+              })
+            }
+            return mapItem(item!)
+          },
+          {
+            params: itemIdParamsSchema,
+            body: updateItemBodySchema
+          }
+        )
+        .get(
+          '/:id/history',
+          ({ params }) => getHistory(params.id),
+          {
+            params: itemIdParamsSchema
+          }
+        )
+        .delete(
+          '/:id',
+          ({ params }) => {
+            db.query('DELETE FROM test_items WHERE id = ?').run(params.id)
+            return { ok: true }
+          },
+          {
+            params: itemIdParamsSchema
+          }
+        )
+    )
+  )
+  .group('/uploads', (uploads) =>
+    uploads.guard({ beforeHandle: requireAuth }, (uploads) =>
+      uploads.get(
+        '/:file',
+        ({ params }) => {
+          const file = Bun.file(`${uploadDir}/${params.file}`)
+          if (!file.size) {
+            return status(404, 'Not found')
+          }
+          return file
+        },
+        {
+          params: t.Object({
+            file: t.String({ minLength: 1 })
+          })
+        }
+      )
+    )
+  )
   .listen(port)
 
 console.log(`API server running on http://localhost:${app.server?.port}`)
