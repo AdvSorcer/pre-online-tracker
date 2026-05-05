@@ -26,13 +26,24 @@
 ## Docker Compose 啟動
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
 啟動後開啟：
 
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:3000
+- Frontend: `http://localhost:7005` 或 `http://<server-ip>:7005`
+- Backend API: 由前端 Nginx 反向代理 `/api`
+- Uploaded files: 由前端 Nginx 反向代理 `/uploads`
+
+如果要改用其他 port：
+
+```bash
+FRONTEND_PORT=5173 docker compose up --build -d
+```
+
+然後開啟 `http://<server-ip>:5173`。
+
+Production compose 不需要把 backend port 對外公開；frontend 與 backend 會透過 Docker Compose 內部網路互通。
 
 ## 環境變數
 

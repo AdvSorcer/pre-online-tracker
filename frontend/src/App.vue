@@ -67,7 +67,7 @@ type FormState = {
   images: File[]
 }
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000'
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
 const environments: Environment[] = ['SIT', 'UAT', 'Online']
 const statuses: Status[] = ['未測試', 'Fail', 'Fixed', 'Retest', 'Pass']
 const priorities: Priority[] = ['P0', 'P1', 'P2', 'P3']
