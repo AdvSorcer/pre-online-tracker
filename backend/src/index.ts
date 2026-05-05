@@ -215,9 +215,16 @@ function corsHeaders() {
   }
 }
 
-function requireAuth({ headers }: { headers: Record<string, string | undefined> }) {
+function requireAuth({
+  headers,
+  query
+}: {
+  headers: Record<string, string | undefined>
+  query?: Record<string, string | undefined>
+}) {
   const authorization = headers.authorization ?? ''
-  if (authorization !== `Bearer ${appToken}`) {
+  const queryToken = query?.token ?? ''
+  if (authorization !== `Bearer ${appToken}` && queryToken !== appToken) {
     return status(401, 'Unauthorized')
   }
 }

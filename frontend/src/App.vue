@@ -244,7 +244,8 @@ function authHeaders() {
 }
 
 function fullImageUrl(path: string) {
-  return `${apiBaseUrl}${path}`
+  const separator = path.includes('?') ? '&' : '?'
+  return `${apiBaseUrl}${path}${separator}token=${encodeURIComponent(token.value)}`
 }
 
 function xmlEscape(value: unknown) {
