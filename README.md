@@ -45,6 +45,11 @@ FRONTEND_PORT=5173 docker compose up --build -d
 
 Production compose 不需要把 backend port 對外公開；frontend 與 backend 會透過 Docker Compose 內部網路互通。
 
+Backend 資料會直接存放在 server 上的專案資料夾：
+
+- SQLite DB: `backend/data/pre-online-tracker.db`
+- Uploaded files: `backend/uploads/`
+
 ## 環境變數
 
 Backend:
