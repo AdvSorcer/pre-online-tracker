@@ -15,18 +15,6 @@ type TestImage = {
   created_at: string
 }
 
-type TestHistory = {
-  id: number
-  item_id: number
-  action: string
-  actor: string
-  from_status: Status | null
-  to_status: Status | null
-  note: string
-  changes: string
-  created_at: string
-}
-
 type TestItem = {
   id: number
   environment: Environment
@@ -43,7 +31,6 @@ type TestItem = {
   tester: string
   note: string
   images: TestImage[]
-  history: TestHistory[]
   image_urls: string[]
   image_url: string | null
   tested_at: string | null
@@ -801,6 +788,14 @@ function buildFormData() {
   data.set('status', form.status)
   data.set('tester', form.tester)
   data.set('note', form.note)
+  if (form.id) {
+    const retainedImageIds = uploadFileList.value
+      .map((fileInfo) => String(fileInfo.id ?? ''))
+      .filter((id) => id.startsWith('existing-'))
+      .map((id) => Number(id.replace('existing-', '')))
+      .filter((id) => Number.isInteger(id) && id > 0)
+    data.set('retained_image_ids', retainedImageIds.join(','))
+  }
   for (const image of form.images) {
     data.append('images', image)
   }
@@ -890,27 +885,6 @@ function statusType(status: Status) {
   if (status === 'Fail') return 'error'
   if (status === 'Fixed' || status === 'Retest') return 'warning'
   return 'default'
-}
-
-function historyActionLabel(action: string) {
-  const labels: Record<string, string> = {
-    created: '建立',
-    imported: '匯入',
-    updated: '更新',
-    status_changed: '狀態變更'
-  }
-  return labels[action] ?? action
-}
-
-function formatHistoryTime(value: string) {
-  return formatExportDate(value)
-}
-
-function historySummary(history: TestHistory) {
-  if (history.from_status || history.to_status) {
-    return `${history.from_status ?? '-'} -> ${history.to_status ?? '-'}`
-  }
-  return history.note || '欄位內容已更新'
 }
 
 watch(activeEnvironment, () => {
@@ -1301,20 +1275,6 @@ onMounted(loadItems)
             </div>
             <n-empty v-else description="尚未上傳圖片" />
 
-            <div>
-              <h2 class="history-heading">測試紀錄歷程</h2>
-              <n-timeline v-if="detailItem.history.length > 0">
-                <n-timeline-item
-                  v-for="history in detailItem.history"
-                  :key="history.id"
-                  :type="history.to_status ? statusType(history.to_status) : 'default'"
-                  :title="historyActionLabel(history.action)"
-                  :content="historySummary(history)"
-                  :time="`${formatHistoryTime(history.created_at)}${history.actor ? ` / ${history.actor}` : ''}`"
-                />
-              </n-timeline>
-              <n-empty v-else description="尚無歷程" />
-            </div>
           </n-space>
         </n-modal>
       </main>

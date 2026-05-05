@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite'
 import { Elysia, status, t, type Static } from 'elysia'
-import { mkdir } from 'node:fs/promises'
-import { extname } from 'node:path'
+import { mkdir, unlink } from 'node:fs/promises'
+import { basename, extname } from 'node:path'
 
 const port = Number(Bun.env.PORT ?? 3000)
 const password = Bun.env.SIMPLE_PASSWORD ?? '2026'
@@ -154,18 +154,6 @@ type TestItemImage = {
   created_at: string
 }
 
-type TestItemHistory = {
-  id: number
-  item_id: number
-  action: string
-  actor: string
-  from_status: string | null
-  to_status: string | null
-  note: string
-  changes: string
-  created_at: string
-}
-
 const environmentSet = new Set<string>(['SIT', 'UAT', 'Online'])
 
 const environmentSchema = t.Union([t.Literal('SIT'), t.Literal('UAT'), t.Literal('Online')])
@@ -196,15 +184,15 @@ const itemInputSchema = {
 const createItemBodySchema = t.Object({
   ...itemInputSchema,
   image: t.Optional(t.File({ type: 'image/*' })),
-  images: t.Optional(t.Files({ type: 'image/*' }))
+  images: t.Optional(t.Files({ type: 'image/*' })),
+  retained_image_ids: t.Optional(t.String())
 })
 const updateItemBodySchema = t.Partial(createItemBodySchema)
 const importItemsBodySchema = t.Object({
-  items: t.Array(t.Object(itemInputSchema)),
-  actor: t.Optional(t.String())
+  items: t.Array(t.Object(itemInputSchema))
 })
 
-type ItemInput = Partial<Omit<Static<typeof createItemBodySchema>, 'image' | 'images'>>
+type ItemInput = Partial<Omit<Static<typeof createItemBodySchema>, 'image' | 'images' | 'retained_image_ids'>>
 type ItemPayload = Static<typeof createItemBodySchema> | Static<typeof updateItemBodySchema>
 
 function corsHeaders() {
@@ -292,35 +280,46 @@ function insertImages(itemId: number, imagePaths: string[]) {
   }
 }
 
+function parseRetainedImageIds(value: string | undefined) {
+  if (value === undefined) return null
+  const normalized = value.trim()
+  if (!normalized) return []
+
+  if (normalized.startsWith('[')) {
+    try {
+      const ids = JSON.parse(normalized)
+      if (Array.isArray(ids)) {
+        return ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+      }
+    } catch {
+      return []
+    }
+  }
+
+  return normalized
+    .split(',')
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0)
+}
+
+async function removeImagesNotIn(itemId: number, retainedIds: number[] | null) {
+  if (retainedIds === null) return
+
+  const existingImages = getImages(itemId)
+  const retained = new Set(retainedIds)
+  const removedImages = existingImages.filter((image) => !retained.has(image.id))
+  if (removedImages.length === 0) return
+
+  const deleteImage = db.query('DELETE FROM test_item_images WHERE id = ? AND item_id = ?')
+  for (const image of removedImages) {
+    deleteImage.run(image.id, itemId)
+    await unlink(`${uploadDir}/${basename(image.path)}`).catch(() => undefined)
+  }
+}
+
 function getImages(itemId: number) {
   return db
     .query<TestItemImage, [number]>('SELECT * FROM test_item_images WHERE item_id = ? ORDER BY id ASC')
-    .all(itemId)
-}
-
-function addHistory(
-  itemId: number,
-  action: string,
-  actor = '',
-  options: { fromStatus?: string | null; toStatus?: string | null; note?: string; changes?: Record<string, unknown> } = {}
-) {
-  db.query(
-    `INSERT INTO test_item_history (item_id, action, actor, from_status, to_status, note, changes)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    itemId,
-    action,
-    actor,
-    options.fromStatus ?? null,
-    options.toStatus ?? null,
-    options.note ?? '',
-    options.changes ? JSON.stringify(options.changes) : ''
-  )
-}
-
-function getHistory(itemId: number) {
-  return db
-    .query<TestItemHistory, [number]>('SELECT * FROM test_item_history WHERE item_id = ? ORDER BY id DESC')
     .all(itemId)
 }
 
@@ -329,35 +328,9 @@ function mapItem(item: TestItem) {
   return {
     ...item,
     images,
-    history: getHistory(item.id),
     image_urls: images.map((image) => image.path),
     image_url: images[0]?.path ?? item.image_path ?? null
   }
-}
-
-function changedFields(before: TestItem, after: TestItem) {
-  const fields = [
-    'environment',
-    'module',
-    'feature',
-    'priority',
-    'owner',
-    'sort_order',
-    'title',
-    'scenario',
-    'test_method',
-    'expected_result',
-    'status',
-    'tester',
-    'note'
-  ] as const
-  const changes: Record<string, { from: unknown; to: unknown }> = {}
-  for (const field of fields) {
-    if (before[field] !== after[field]) {
-      changes[field] = { from: before[field], to: after[field] }
-    }
-  }
-  return changes
 }
 
 const app = new Elysia()
@@ -439,7 +412,6 @@ const app = new Elysia()
 
             const itemId = Number(result.lastInsertRowid)
             insertImages(itemId, imagePaths)
-            addHistory(itemId, 'created', input.tester, { toStatus: input.status, note: input.note })
             const item = db.query<TestItem, [number]>('SELECT * FROM test_items WHERE id = ?').get(itemId)
             return mapItem(item!)
           },
@@ -460,7 +432,7 @@ const app = new Elysia()
               for (const rawItem of body.items) {
                 const input = normalizeInput(rawItem)
                 const testedAt = input.status === '未測試' ? null : new Date().toISOString()
-                const result = insert.run(
+                insert.run(
                   input.environment!,
                   input.module!,
                   input.feature!,
@@ -477,10 +449,6 @@ const app = new Elysia()
                   testedAt
                 )
                 imported += 1
-                addHistory(Number(result.lastInsertRowid), 'imported', body.actor ?? input.tester, {
-                  toStatus: input.status,
-                  note: input.note
-                })
               }
             })()
 
@@ -500,11 +468,12 @@ const app = new Elysia()
 
             const input = normalizeInput(body, true)
             const newImagePaths = await saveImages(body)
+            await removeImagesNotIn(params.id, parseRetainedImageIds(body.retained_image_ids))
             if (newImagePaths.length > 0) {
               insertImages(params.id, newImagePaths)
             }
             const images = getImages(params.id)
-            const firstImagePath = images[0]?.path ?? newImagePaths[0] ?? existing.image_path
+            const firstImagePath = images[0]?.path ?? null
             const statusChanged = input.status !== undefined && input.status !== existing.status
             const testedAt = statusChanged ? (input.status === '未測試' ? null : new Date().toISOString()) : existing.tested_at
 
@@ -547,27 +516,11 @@ const app = new Elysia()
             )
 
             const item = db.query<TestItem, [number]>('SELECT * FROM test_items WHERE id = ?').get(params.id)
-            const changes = changedFields(existing, item!)
-            if (Object.keys(changes).length > 0 || newImagePaths.length > 0) {
-              addHistory(params.id, existing.status !== item!.status ? 'status_changed' : 'updated', item!.tester, {
-                fromStatus: existing.status,
-                toStatus: item!.status,
-                note: item!.note,
-                changes: newImagePaths.length > 0 ? { ...changes, images_added: newImagePaths.length } : changes
-              })
-            }
             return mapItem(item!)
           },
           {
             params: itemIdParamsSchema,
             body: updateItemBodySchema
-          }
-        )
-        .get(
-          '/:id/history',
-          ({ params }) => getHistory(params.id),
-          {
-            params: itemIdParamsSchema
           }
         )
         .delete(

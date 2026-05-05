@@ -294,11 +294,6 @@ td small {
   width: min(900px, calc(100vw - 32px));
 }
 
-.history-heading {
-  margin-bottom: 12px;
-  font-size: 18px;
-}
-
 .image-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
