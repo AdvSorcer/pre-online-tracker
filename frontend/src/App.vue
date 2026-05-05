@@ -19,7 +19,6 @@ type TestItem = {
   id: number
   environment: Environment
   module: string
-  feature: string
   priority: Priority
   owner: string
   sort_order: number
@@ -40,7 +39,6 @@ type FormState = {
   id: number | null
   environment: Environment
   module: string
-  feature: string
   priority: Priority
   owner: string
   sort_order: number
@@ -74,7 +72,6 @@ const xlsxHeaders = [
   '編號',
   '環境',
   '模組',
-  '功能',
   '優先級',
   '負責人',
   '排序',
@@ -127,7 +124,6 @@ const emptyForm = (): FormState => ({
   id: null,
   environment: activeEnvironment.value,
   module: '',
-  feature: '',
   priority: 'P2',
   owner: '',
   sort_order: 0,
@@ -172,7 +168,6 @@ const filteredItems = computed(() => {
     [
       item.title,
       item.module,
-      item.feature,
       item.priority,
       item.owner,
       item.scenario,
@@ -357,7 +352,6 @@ function buildWorksheetXml(exportItems: TestItem[]) {
       index + 1,
       item.environment,
       item.module,
-      item.feature,
       item.priority,
       item.owner,
       item.sort_order,
@@ -392,12 +386,12 @@ function buildWorksheetXml(exportItems: TestItem[]) {
   <cols>
     <col min="1" max="1" width="8" customWidth="1"/>
     <col min="2" max="2" width="12" customWidth="1"/>
-    <col min="3" max="6" width="14" customWidth="1"/>
-    <col min="7" max="7" width="10" customWidth="1"/>
-    <col min="8" max="11" width="28" customWidth="1"/>
-    <col min="12" max="13" width="14" customWidth="1"/>
-    <col min="14" max="14" width="28" customWidth="1"/>
-    <col min="15" max="15" width="20" customWidth="1"/>
+    <col min="3" max="5" width="14" customWidth="1"/>
+    <col min="6" max="6" width="10" customWidth="1"/>
+    <col min="7" max="10" width="28" customWidth="1"/>
+    <col min="11" max="12" width="14" customWidth="1"/>
+    <col min="13" max="13" width="28" customWidth="1"/>
+    <col min="14" max="14" width="20" customWidth="1"/>
   </cols>
   <sheetData>${sheetData}</sheetData>
 </worksheet>`
@@ -504,7 +498,6 @@ function buildExportRows(exportItems: TestItem[]) {
       index + 1,
       item.environment,
       item.module,
-      item.feature,
       item.priority,
       item.owner,
       item.sort_order,
@@ -598,7 +591,6 @@ async function importCsvFile(file: File) {
     .map((row, index) => ({
       environment: read(row, ['環境'], activeEnvironment.value),
       module: read(row, ['模組']),
-      feature: read(row, ['功能']),
       priority: parsePriority(read(row, ['優先級'])),
       owner: read(row, ['負責人']),
       sort_order: Number(read(row, ['排序'], String(index + 1))) || index + 1,
@@ -741,7 +733,6 @@ function editItem(item: TestItem) {
     id: item.id,
     environment: item.environment,
     module: item.module,
-    feature: item.feature,
     priority: item.priority,
     owner: item.owner,
     sort_order: item.sort_order,
@@ -777,7 +768,6 @@ function buildFormData() {
   const data = new FormData()
   data.set('environment', form.environment)
   data.set('module', form.module)
-  data.set('feature', form.feature)
   data.set('priority', form.priority)
   data.set('owner', form.owner)
   data.set('sort_order', String(form.sort_order))
@@ -834,7 +824,6 @@ async function updateStatus(item: TestItem, status: Status) {
   const data = new FormData()
   data.set('environment', item.environment)
   data.set('module', item.module)
-  data.set('feature', item.feature)
   data.set('priority', item.priority)
   data.set('owner', item.owner)
   data.set('sort_order', String(item.sort_order))
@@ -1055,7 +1044,7 @@ onMounted(loadItems)
               <n-table :bordered="false" :single-line="false">
                 <thead>
                   <tr>
-                    <th>分類</th>
+                    <th>模組</th>
                     <th>優先級</th>
                     <th>測試項目</th>
                     <th>測試方式</th>
@@ -1071,7 +1060,6 @@ onMounted(loadItems)
                   <tr v-for="item in paginatedItems" :key="item.id">
                     <td>
                       <strong>{{ item.module || '-' }}</strong>
-                      <small>{{ item.feature || '-' }}</small>
                     </td>
                     <td>
                       <n-tag size="small" :type="item.priority === 'P0' || item.priority === 'P1' ? 'error' : 'default'">
@@ -1180,14 +1168,9 @@ onMounted(loadItems)
               </div>
 
               <div class="form-column">
-                <n-grid :cols="2" :x-gap="12" responsive="screen">
-                  <n-form-item-gi label="模組">
-                    <n-input v-model:value="form.module" placeholder="例如：工單" />
-                  </n-form-item-gi>
-                  <n-form-item-gi label="功能">
-                    <n-input v-model:value="form.feature" placeholder="例如：入戶流程" />
-                  </n-form-item-gi>
-                </n-grid>
+                <n-form-item label="模組">
+                  <n-input v-model:value="form.module" placeholder="例如：web、app" />
+                </n-form-item>
 
                 <n-grid :cols="3" :x-gap="12" responsive="screen">
                   <n-form-item-gi label="優先級">
@@ -1249,8 +1232,8 @@ onMounted(loadItems)
             </n-space>
 
             <n-descriptions bordered :column="1" size="small">
-              <n-descriptions-item label="模組 / 功能">
-                {{ detailItem.module || '-' }} / {{ detailItem.feature || '-' }}
+              <n-descriptions-item label="模組">
+                {{ detailItem.module || '-' }}
               </n-descriptions-item>
               <n-descriptions-item label="負責人 / 排序">
                 {{ detailItem.owner || '-' }} / #{{ detailItem.sort_order }}
