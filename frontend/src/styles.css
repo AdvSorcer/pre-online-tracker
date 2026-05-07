@@ -180,6 +180,20 @@ td small {
   margin-bottom: 14px;
 }
 
+.settings-section {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-section h2 {
+  font-size: 18px;
+}
+
+.settings-section p {
+  color: #607080;
+  line-height: 1.6;
+}
+
 .form-hint {
   margin: -8px 0 14px;
   color: #6d7a87;

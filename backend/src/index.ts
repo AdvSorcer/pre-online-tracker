@@ -317,6 +317,13 @@ async function removeImagesNotIn(itemId: number, retainedIds: number[] | null) {
   }
 }
 
+async function removeItemImageFiles(images: TestItemImage[]) {
+  const paths = new Set(images.map((image) => image.path).filter(Boolean))
+  for (const imagePath of paths) {
+    await unlink(`${uploadDir}/${basename(imagePath)}`).catch(() => undefined)
+  }
+}
+
 function getImages(itemId: number) {
   return db
     .query<TestItemImage, [number]>('SELECT * FROM test_item_images WHERE item_id = ? ORDER BY id ASC')
@@ -524,9 +531,22 @@ const app = new Elysia()
           }
         )
         .delete(
+          '/all',
+          async () => {
+            const images = db.query<TestItemImage, []>('SELECT * FROM test_item_images').all()
+            db.transaction(() => {
+              db.run('DELETE FROM test_items')
+            })()
+            await removeItemImageFiles(images)
+            return { ok: true, deleted: true }
+          }
+        )
+        .delete(
           '/:id',
-          ({ params }) => {
+          async ({ params }) => {
+            const images = getImages(params.id)
             db.query('DELETE FROM test_items WHERE id = ?').run(params.id)
+            await removeItemImageFiles(images)
             return { ok: true }
           },
           {

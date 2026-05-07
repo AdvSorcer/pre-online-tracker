@@ -93,11 +93,14 @@ const currentView = ref<'items' | 'stats'>('items')
 const items = ref<TestItem[]>([])
 const loading = ref(false)
 const saving = ref(false)
+const deletingAll = ref(false)
 const error = ref('')
+const settingsError = ref('')
 const uploadFileList = ref<UploadFileInfo[]>([])
 const imagePreviews = ref<string[]>([])
 const importFileInput = ref<HTMLInputElement | null>(null)
 const itemFormOpen = ref(false)
+const settingsOpen = ref(false)
 const detailItem = ref<TestItem | null>(null)
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -106,6 +109,7 @@ const statusFilter = ref<StatusFilter>('all')
 const moduleFilter = ref<CategoryFilter>('all')
 const ownerFilter = ref<CategoryFilter>('all')
 const sortBy = ref('sort_order')
+const deleteAllConfirmText = ref('')
 const itemModalOpen = computed({
   get: () => itemFormOpen.value,
   set: (show: boolean) => {
@@ -194,6 +198,7 @@ const sortedItems = computed(() => {
   })
 })
 const pageCount = computed(() => Math.max(1, Math.ceil(sortedItems.value.length / pageSize.value)))
+const canDeleteAllItems = computed(() => items.value.length > 0 && deleteAllConfirmText.value === 'DELETE')
 const paginatedItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   return sortedItems.value.slice(start, start + pageSize.value)
@@ -755,6 +760,12 @@ function closeItemModal() {
   resetForm()
 }
 
+function closeSettings() {
+  settingsOpen.value = false
+  settingsError.value = ''
+  deleteAllConfirmText.value = ''
+}
+
 function handleUploadChange(options: { fileList: UploadFileInfo[] }) {
   resetUploadPreviews()
   uploadFileList.value = options.fileList
@@ -860,6 +871,33 @@ async function deleteItem(item: TestItem) {
   if (response.ok) await loadItems()
 }
 
+async function deleteAllItems() {
+  if (!canDeleteAllItems.value) return
+
+  const confirmed = window.confirm(`確定刪除全部 ${items.value.length} 筆測試資料？此操作無法復原。`)
+  if (!confirmed) return
+
+  deletingAll.value = true
+  settingsError.value = ''
+  error.value = ''
+
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/items/all`, {
+      method: 'DELETE',
+      headers: authHeaders()
+    })
+    if (!response.ok) throw new Error('刪除所有資料失敗')
+    detailItem.value = null
+    closeItemModal()
+    closeSettings()
+    await loadItems()
+  } catch (err) {
+    settingsError.value = err instanceof Error ? err.message : '刪除所有資料失敗'
+  } finally {
+    deletingAll.value = false
+  }
+}
+
 function openDetail(item: TestItem) {
   detailItem.value = item
 }
@@ -898,6 +936,13 @@ watch(ownerFilter, () => {
 
 watch(sortBy, () => {
   currentPage.value = 1
+})
+
+watch(settingsOpen, (open) => {
+  if (!open) {
+    settingsError.value = ''
+    deleteAllConfirmText.value = ''
+  }
 })
 
 watch([filteredItems, pageSize], () => {
@@ -950,9 +995,41 @@ onMounted(loadItems)
                 統計資訊
               </n-button>
             </n-button-group>
+            <n-button secondary @click="settingsOpen = true">設定</n-button>
             <n-button secondary @click="logout">登出</n-button>
           </n-space>
         </header>
+
+        <n-drawer v-model:show="settingsOpen" :width="360" placement="right">
+          <n-drawer-content title="設定" closable>
+            <n-space vertical size="large">
+              <section class="settings-section">
+                <h2>資料管理</h2>
+                <p>目前共有 {{ items.length }} 筆測試資料。刪除後會清空所有環境的測試項目與圖片。</p>
+
+                <n-alert v-if="settingsError" type="error" class="form-alert">{{ settingsError }}</n-alert>
+
+                <n-form-item label="輸入 DELETE 確認刪除">
+                  <n-input
+                    v-model:value="deleteAllConfirmText"
+                    placeholder="DELETE"
+                    :disabled="items.length === 0 || deletingAll"
+                  />
+                </n-form-item>
+
+                <n-button
+                  type="error"
+                  block
+                  :disabled="!canDeleteAllItems"
+                  :loading="deletingAll"
+                  @click="deleteAllItems"
+                >
+                  刪除所有資料
+                </n-button>
+              </section>
+            </n-space>
+          </n-drawer-content>
+        </n-drawer>
 
         <section v-if="currentView === 'stats'" class="stats-screen">
           <div class="section-heading">
