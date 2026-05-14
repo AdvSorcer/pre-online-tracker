@@ -1343,7 +1343,10 @@ onMounted(loadItems)
                       <span v-else class="muted">無</span>
                       <n-tag v-if="item.images.length > 0" size="small" round>{{ item.images.length }} 張</n-tag>
                     </td>
-                    <td>{{ item.note || '-' }}</td>
+                    <td class="note-cell">
+                      <n-button v-if="item.note" size="tiny" secondary @click="openDetail(item)">查看備註</n-button>
+                      <span v-else class="muted">-</span>
+                    </td>
                     <td>
                       <n-space size="small">
                         <n-button size="small" secondary @click="openDetail(item)">查看更多</n-button>
