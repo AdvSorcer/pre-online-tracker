@@ -1300,7 +1300,6 @@ onMounted(loadItems)
                 <thead>
                   <tr>
                     <th>模組</th>
-                    <th>優先級</th>
                     <th>測試項目</th>
                     <th>測試方式</th>
                     <th>預期結果</th>
@@ -1315,12 +1314,6 @@ onMounted(loadItems)
                   <tr v-for="item in paginatedItems" :key="item.id">
                     <td>
                       <strong>{{ item.module || '-' }}</strong>
-                    </td>
-                    <td>
-                      <n-tag size="small" :type="item.priority === 'P0' || item.priority === 'P1' ? 'error' : 'default'">
-                        {{ item.priority }}
-                      </n-tag>
-                      <small>#{{ item.sort_order }}</small>
                     </td>
                     <td>
                       <strong>{{ item.title }}</strong>
@@ -1356,7 +1349,7 @@ onMounted(loadItems)
                     </td>
                   </tr>
                   <tr v-if="filteredItems.length === 0">
-                    <td colspan="10" class="empty-state">
+                    <td colspan="9" class="empty-state">
                       {{ environmentItems.length === 0 ? '尚無測試項目' : '找不到符合篩選條件的測試項目' }}
                     </td>
                   </tr>
