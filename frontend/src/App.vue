@@ -108,6 +108,7 @@ const searchKeyword = ref('')
 const statusFilter = ref<StatusFilter>('all')
 const moduleFilter = ref<CategoryFilter>('all')
 const ownerFilter = ref<CategoryFilter>('all')
+const testerFilter = ref<CategoryFilter>('all')
 const sortBy = ref('sort_order')
 const deleteAllConfirmText = ref('')
 const itemModalOpen = computed({
@@ -156,12 +157,19 @@ const ownerOptions = computed(() => [
     .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
     .map((value) => ({ label: value, value }))
 ])
+const testerOptions = computed(() => [
+  { label: '全部測試人員', value: 'all' },
+  ...Array.from(new Set(environmentItems.value.map((item) => item.tester).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+    .map((value) => ({ label: value, value }))
+])
 const statusFilteredItems = computed(() => {
   return environmentItems.value.filter((item) => {
     const statusMatched = statusFilter.value === 'all' || item.status === statusFilter.value
     const moduleMatched = moduleFilter.value === 'all' || item.module === moduleFilter.value
     const ownerMatched = ownerFilter.value === 'all' || item.owner === ownerFilter.value
-    return statusMatched && moduleMatched && ownerMatched
+    const testerMatched = testerFilter.value === 'all' || item.tester === testerFilter.value
+    return statusMatched && moduleMatched && ownerMatched && testerMatched
   })
 })
 const normalizedSearchKeyword = computed(() => searchKeyword.value.trim().toLowerCase())
@@ -577,11 +585,157 @@ function parsePriority(value: string): Priority {
   return priorities.includes(value.trim() as Priority) ? (value.trim() as Priority) : 'P2'
 }
 
-async function importCsvFile(file: File) {
-  const rows = parseCsv(await file.text())
+function worksheetColumnIndex(reference: string, fallback: number) {
+  const match = reference.match(/^[A-Z]+/i)
+  if (!match) return fallback
+
+  return match[0]
+    .toUpperCase()
+    .split('')
+    .reduce((index, letter) => index * 26 + letter.charCodeAt(0) - 64, 0) - 1
+}
+
+async function inflateRaw(data: Uint8Array) {
+  if (!('DecompressionStream' in window)) {
+    throw new Error('此瀏覽器不支援直接解析 XLSX，請改用 CSV 匯入')
+  }
+
+  const copy = new Uint8Array(data.length)
+  copy.set(data)
+  const stream = new Blob([copy.buffer]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+  return new Uint8Array(await new Response(stream).arrayBuffer())
+}
+
+async function readZipTextEntries(buffer: ArrayBuffer) {
+  const view = new DataView(buffer)
+  const bytes = new Uint8Array(buffer)
+  const decoder = new TextDecoder()
+  let endOffset = -1
+
+  for (let offset = bytes.length - 22; offset >= 0; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) {
+      endOffset = offset
+      break
+    }
+  }
+  if (endOffset === -1) throw new Error('XLSX 檔案格式不正確')
+
+  const centralDirectoryOffset = view.getUint32(endOffset + 16, true)
+  const totalEntries = view.getUint16(endOffset + 10, true)
+  const entries = new Map<string, string>()
+  let offset = centralDirectoryOffset
+
+  for (let index = 0; index < totalEntries; index += 1) {
+    if (view.getUint32(offset, true) !== 0x02014b50) throw new Error('XLSX 檔案格式不正確')
+
+    const compressionMethod = view.getUint16(offset + 10, true)
+    const compressedSize = view.getUint32(offset + 20, true)
+    const fileNameLength = view.getUint16(offset + 28, true)
+    const extraLength = view.getUint16(offset + 30, true)
+    const commentLength = view.getUint16(offset + 32, true)
+    const localHeaderOffset = view.getUint32(offset + 42, true)
+    const nameStart = offset + 46
+    const name = decoder.decode(bytes.slice(nameStart, nameStart + fileNameLength))
+
+    const localFileNameLength = view.getUint16(localHeaderOffset + 26, true)
+    const localExtraLength = view.getUint16(localHeaderOffset + 28, true)
+    const dataStart = localHeaderOffset + 30 + localFileNameLength + localExtraLength
+    const compressed = bytes.slice(dataStart, dataStart + compressedSize)
+    let content: Uint8Array
+
+    if (compressionMethod === 0) {
+      content = compressed
+    } else if (compressionMethod === 8) {
+      content = await inflateRaw(compressed)
+    } else {
+      throw new Error('XLSX 使用了目前不支援的壓縮格式')
+    }
+
+    if (name.endsWith('.xml') || name.endsWith('.rels')) {
+      entries.set(name, decoder.decode(content))
+    }
+    offset = nameStart + fileNameLength + extraLength + commentLength
+  }
+
+  return entries
+}
+
+function parseXml(xml: string) {
+  const document = new DOMParser().parseFromString(xml, 'application/xml')
+  if (document.querySelector('parsererror')) throw new Error('XLSX XML 內容解析失敗')
+  return document
+}
+
+function textFromElement(element: Element) {
+  return Array.from(element.getElementsByTagName('t'))
+    .map((node) => node.textContent ?? '')
+    .join('')
+}
+
+function readSharedStrings(entries: Map<string, string>) {
+  const xml = entries.get('xl/sharedStrings.xml')
+  if (!xml) return []
+  return Array.from(parseXml(xml).getElementsByTagName('si')).map(textFromElement)
+}
+
+function firstWorksheetPath(entries: Map<string, string>) {
+  const workbook = parseXml(entries.get('xl/workbook.xml') ?? '')
+  const firstSheet = workbook.getElementsByTagName('sheet')[0]
+  const relationshipId = firstSheet?.getAttribute('r:id')
+  if (!relationshipId) return 'xl/worksheets/sheet1.xml'
+
+  const relationships = parseXml(entries.get('xl/_rels/workbook.xml.rels') ?? '')
+  const relationship = Array.from(relationships.getElementsByTagName('Relationship')).find(
+    (node) => node.getAttribute('Id') === relationshipId
+  )
+  const target = relationship?.getAttribute('Target') ?? 'worksheets/sheet1.xml'
+  if (target.startsWith('/')) return target.slice(1)
+
+  const parts: string[] = ['xl']
+  for (const part of target.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      parts.pop()
+    } else {
+      parts.push(part)
+    }
+  }
+  return parts.join('/')
+}
+
+function readCellValue(cell: Element, sharedStrings: string[]) {
+  const type = cell.getAttribute('t')
+  if (type === 'inlineStr') return textFromElement(cell)
+
+  const value = cell.getElementsByTagName('v')[0]?.textContent ?? ''
+  if (type === 's') return sharedStrings[Number(value)] ?? ''
+  if (type === 'b') return value === '1' ? 'TRUE' : 'FALSE'
+  return value
+}
+
+async function parseXlsx(file: File) {
+  const entries = await readZipTextEntries(await file.arrayBuffer())
+  const sheetXml = entries.get(firstWorksheetPath(entries))
+  if (!sheetXml) throw new Error('XLSX 找不到第一個工作表')
+
+  const sharedStrings = readSharedStrings(entries)
+  const sheet = parseXml(sheetXml)
+  return Array.from(sheet.getElementsByTagName('row'))
+    .map((row) => {
+      const values: string[] = []
+      Array.from(row.getElementsByTagName('c')).forEach((cell, index) => {
+        const columnIndex = worksheetColumnIndex(cell.getAttribute('r') ?? '', index)
+        values[columnIndex] = readCellValue(cell, sharedStrings)
+      })
+      return values.map((value) => value ?? '')
+    })
+    .filter((row) => row.some((value) => value.trim()))
+}
+
+async function importRows(rows: string[][], sourceLabel: string) {
   const [headerRow, ...dataRows] = rows
   if (!headerRow || dataRows.length === 0) {
-    error.value = 'CSV 沒有可匯入的資料'
+    error.value = `${sourceLabel} 沒有可匯入的資料`
     return
   }
   const headerIndex = new Map(headerRow.map((header, index) => [normalizeHeader(header), index]))
@@ -610,7 +764,7 @@ async function importCsvFile(file: File) {
     .filter((item) => item.title)
 
   if (importedItems.length === 0) {
-    error.value = 'CSV 找不到測試項目欄位或內容'
+    error.value = `${sourceLabel} 找不到測試項目欄位或內容`
     return
   }
 
@@ -623,6 +777,14 @@ async function importCsvFile(file: File) {
   await loadItems()
 }
 
+async function importCsvFile(file: File) {
+  await importRows(parseCsv(await file.text()), 'CSV')
+}
+
+async function importXlsxFile(file: File) {
+  await importRows(await parseXlsx(file), 'XLSX')
+}
+
 function triggerImport() {
   importFileInput.value?.click()
 }
@@ -632,14 +794,21 @@ async function handleImportFile(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  if (!file.name.toLowerCase().endsWith('.csv')) {
-    error.value = '目前支援匯入 CSV；可從 Excel 另存 CSV 後匯入'
+  const fileName = file.name.toLowerCase()
+  const isCsv = fileName.endsWith('.csv')
+  const isXlsx = fileName.endsWith('.xlsx')
+  if (!isCsv && !isXlsx) {
+    error.value = '目前支援匯入 CSV 或 XLSX'
     return
   }
   loading.value = true
   error.value = ''
   try {
-    await importCsvFile(file)
+    if (isXlsx) {
+      await importXlsxFile(file)
+    } else {
+      await importCsvFile(file)
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '匯入失敗'
   } finally {
@@ -934,6 +1103,10 @@ watch(ownerFilter, () => {
   currentPage.value = 1
 })
 
+watch(testerFilter, () => {
+  currentPage.value = 1
+})
+
 watch(sortBy, () => {
   currentPage.value = 1
 })
@@ -1096,12 +1269,17 @@ onMounted(loadItems)
                   class="status-filter"
                 />
                 <n-select
+                  v-model:value="testerFilter"
+                  :options="testerOptions"
+                  class="status-filter"
+                />
+                <n-select
                   v-model:value="sortBy"
                   :options="sortOptions"
                   class="sort-select"
                 />
                 <n-button type="primary" @click="openCreateItem">新增測試項目</n-button>
-                <n-button secondary @click="triggerImport">匯入 CSV</n-button>
+                <n-button secondary @click="triggerImport">匯入 CSV / XLSX</n-button>
                 <n-button secondary :disabled="sortedItems.length === 0" @click="exportCsv">匯出 CSV</n-button>
                 <n-button secondary :disabled="sortedItems.length === 0" @click="exportXlsx">匯出 XLSX</n-button>
                 <n-button secondary :loading="loading" @click="loadItems">重新整理</n-button>
@@ -1110,7 +1288,7 @@ onMounted(loadItems)
                 ref="importFileInput"
                 class="file-input"
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 @change="handleImportFile"
               />
             </template>
