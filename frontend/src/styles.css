@@ -96,6 +96,25 @@ td small {
   align-content: start;
 }
 
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-card span {
+  display: block;
+  color: #607080;
+  font-weight: 750;
+}
+
+.summary-card strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 32px;
+  line-height: 1;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -168,8 +187,26 @@ td small {
   width: 140px;
 }
 
+.long-filter {
+  width: clamp(180px, 18vw, 280px);
+}
+
 .sort-select {
   width: 170px;
+}
+
+.wide-select-menu {
+  width: max-content;
+  min-width: 220px;
+  max-width: min(520px, calc(100vw - 32px));
+}
+
+.wide-select-menu .select-option-label {
+  display: block;
+  max-width: min(480px, calc(100vw - 64px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-input {
@@ -220,6 +257,14 @@ td small {
 
 .image-cell {
   min-width: 90px;
+}
+
+.title-cell {
+  min-width: 260px;
+}
+
+.tester-cell {
+  min-width: 180px;
 }
 
 .note-cell {
@@ -336,6 +381,7 @@ td small {
 
 @media (max-width: 980px) {
   .stats-grid,
+  .summary-grid,
   .workspace {
     grid-template-columns: 1fr;
   }

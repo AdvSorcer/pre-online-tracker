@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { UploadFileInfo } from 'naive-ui'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import type { SelectRenderLabel, UploadFileInfo } from 'naive-ui'
+import { computed, h, onMounted, reactive, ref, watch } from 'vue'
+import StatsPage from './pages/StatsPage.vue'
 
 type Environment = 'SIT' | 'UAT' | 'Online'
 type Status = '未測試' | 'Pass' | 'Fail' | 'Fixed' | 'Retest'
@@ -218,19 +219,11 @@ const paginationRange = computed(() => {
   return { start, end }
 })
 
-const stats = computed(() =>
-  environments.map((environment) => {
-    const scoped = items.value.filter((item) => item.environment === environment)
-    const pass = scoped.filter((item) => item.status === 'Pass').length
-    const fail = scoped.filter((item) => item.status === 'Fail').length
-    const fixed = scoped.filter((item) => item.status === 'Fixed').length
-    const retest = scoped.filter((item) => item.status === 'Retest').length
-    const untested = scoped.filter((item) => item.status === '未測試').length
-    const completed = pass + fail + fixed + retest
-    const rate = scoped.length === 0 ? 0 : Math.round((completed / scoped.length) * 100)
-    return { environment, total: scoped.length, pass, fail, fixed, retest, untested, rate }
-  })
-)
+const wideSelectMenuProps = { class: 'wide-select-menu' }
+const renderSelectLabel: SelectRenderLabel = (option) => {
+  const label = String(option.label ?? option.value ?? '')
+  return h('span', { class: 'select-option-label', title: label }, label)
+}
 
 function authHeaders() {
   return {
@@ -1204,32 +1197,13 @@ onMounted(loadItems)
           </n-drawer-content>
         </n-drawer>
 
-        <section v-if="currentView === 'stats'" class="stats-screen">
-          <div class="section-heading">
-            <p class="eyebrow">Overview</p>
-            <h2>統計資訊</h2>
-          </div>
-
-          <div class="stats-grid">
-            <n-card
-              v-for="stat in stats"
-              :key="stat.environment"
-              class="stat-card"
-              :class="{ active: activeEnvironment === stat.environment }"
-              hoverable
-              @click="openEnvironment(stat.environment)"
-            >
-              <n-space vertical size="small">
-                <span>{{ stat.environment }}</span>
-                <strong>{{ stat.rate }}%</strong>
-                <small>
-                  總數 {{ stat.total }} / Pass {{ stat.pass }} / Fail {{ stat.fail }} / Fixed {{ stat.fixed }} /
-                  Retest {{ stat.retest }} / 未測試 {{ stat.untested }}
-                </small>
-              </n-space>
-            </n-card>
-          </div>
-        </section>
+        <StatsPage
+          v-if="currentView === 'stats'"
+          :items="items"
+          :environments="environments"
+          :active-environment="activeEnvironment"
+          @open-environment="openEnvironment"
+        />
 
         <section v-else class="workspace">
           <n-card class="list-panel">
@@ -1257,26 +1231,37 @@ onMounted(loadItems)
                   v-model:value="statusFilter"
                   :options="statusFilterOptions"
                   class="status-filter"
+                  :render-label="renderSelectLabel"
                 />
                 <n-select
                   v-model:value="moduleFilter"
                   :options="moduleOptions"
-                  class="status-filter"
+                  class="status-filter long-filter"
+                  :consistent-menu-width="false"
+                  :menu-props="wideSelectMenuProps"
+                  :render-label="renderSelectLabel"
                 />
                 <n-select
                   v-model:value="ownerFilter"
                   :options="ownerOptions"
-                  class="status-filter"
+                  class="status-filter long-filter"
+                  :consistent-menu-width="false"
+                  :menu-props="wideSelectMenuProps"
+                  :render-label="renderSelectLabel"
                 />
                 <n-select
                   v-model:value="testerFilter"
                   :options="testerOptions"
-                  class="status-filter"
+                  class="status-filter long-filter"
+                  :consistent-menu-width="false"
+                  :menu-props="wideSelectMenuProps"
+                  :render-label="renderSelectLabel"
                 />
                 <n-select
                   v-model:value="sortBy"
                   :options="sortOptions"
                   class="sort-select"
+                  :render-label="renderSelectLabel"
                 />
                 <n-button type="primary" @click="openCreateItem">新增測試項目</n-button>
                 <n-button secondary @click="triggerImport">匯入 CSV / XLSX</n-button>
@@ -1315,7 +1300,7 @@ onMounted(loadItems)
                     <td>
                       <strong>{{ item.module || '-' }}</strong>
                     </td>
-                    <td>
+                    <td class="title-cell">
                       <strong>{{ item.title }}</strong>
                       <small>{{ item.scenario }}</small>
                     </td>
@@ -1330,7 +1315,7 @@ onMounted(loadItems)
                         @update:value="(value: string | number) => handleStatusChange(item, value)"
                       />
                     </td>
-                    <td>{{ item.tester || '-' }}</td>
+                    <td class="tester-cell">{{ item.tester || '-' }}</td>
                     <td class="image-cell">
                       <img v-if="item.image_url" class="thumb" :src="fullImageUrl(item.image_url)" :alt="item.title" />
                       <span v-else class="muted">無</span>
