@@ -1,90 +1,31 @@
 <script setup lang="ts">
 import type { SelectRenderLabel, UploadFileInfo } from 'naive-ui'
 import { computed, h, onMounted, reactive, ref, watch } from 'vue'
+import {
+  UnauthorizedError,
+  apiBaseUrl,
+  deleteAllItems as deleteAllItemsRequest,
+  deleteItem as deleteItemRequest,
+  fetchItems,
+  importItems,
+  login as loginRequest,
+  saveItem as saveItemRequest,
+  updateItem
+} from './api'
+import {
+  environmentOptions,
+  environments,
+  pageSizeOptions,
+  priorities,
+  priorityOptions,
+  sortOptions,
+  statuses,
+  statusFilterOptions,
+  statusOptions,
+  xlsxHeaders
+} from './constants'
 import StatsPage from './pages/StatsPage.vue'
-
-type Environment = 'SIT' | 'UAT' | 'Online'
-type Status = '未測試' | 'Pass' | 'Fail' | 'Fixed' | 'Retest'
-type StatusFilter = Status | 'all'
-type Priority = 'P0' | 'P1' | 'P2' | 'P3'
-type CategoryFilter = string | 'all'
-
-type TestImage = {
-  id: number
-  item_id: number
-  path: string
-  created_at: string
-}
-
-type TestItem = {
-  id: number
-  environment: Environment
-  module: string
-  priority: Priority
-  owner: string
-  sort_order: number
-  title: string
-  scenario: string
-  test_method: string
-  expected_result: string
-  status: Status
-  tester: string
-  note: string
-  images: TestImage[]
-  image_urls: string[]
-  image_url: string | null
-  tested_at: string | null
-}
-
-type FormState = {
-  id: number | null
-  environment: Environment
-  module: string
-  priority: Priority
-  owner: string
-  sort_order: number
-  title: string
-  scenario: string
-  test_method: string
-  expected_result: string
-  status: Status
-  tester: string
-  note: string
-  images: File[]
-}
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
-const environments: Environment[] = ['SIT', 'UAT', 'Online']
-const statuses: Status[] = ['未測試', 'Fail', 'Fixed', 'Retest', 'Pass']
-const priorities: Priority[] = ['P0', 'P1', 'P2', 'P3']
-const environmentOptions = environments.map((value) => ({ label: value, value }))
-const statusOptions = statuses.map((value) => ({ label: value, value }))
-const priorityOptions = priorities.map((value) => ({ label: value, value }))
-const statusFilterOptions = [{ label: '全部狀態', value: 'all' }, ...statusOptions]
-const sortOptions = [
-  { label: '排序值 / 新到舊', value: 'sort_order' },
-  { label: '優先級', value: 'priority' },
-  { label: '模組', value: 'module' },
-  { label: '負責人', value: 'owner' },
-  { label: '狀態流程', value: 'status' }
-]
-const pageSizeOptions = [5, 10, 20, 50]
-const xlsxHeaders = [
-  '編號',
-  '環境',
-  '模組',
-  '優先級',
-  '負責人',
-  '排序',
-  '測試項目',
-  '測試情境',
-  '測試方式',
-  '預期結果',
-  '狀態',
-  '測試人員',
-  '備註',
-  '測試時間'
-] as const
+import type { CategoryFilter, Environment, FormState, Priority, Status, StatusFilter, TestImage, TestItem } from './types'
 
 const token = ref(localStorage.getItem('pre-online-token') ?? '')
 const passwordInput = ref('')
@@ -223,12 +164,6 @@ const wideSelectMenuProps = { class: 'wide-select-menu' }
 const renderSelectLabel: SelectRenderLabel = (option) => {
   const label = String(option.label ?? option.value ?? '')
   return h('span', { class: 'select-option-label', title: label }, label)
-}
-
-function authHeaders() {
-  return {
-    Authorization: `Bearer ${token.value}`
-  }
 }
 
 function fullImageUrl(path: string) {
@@ -761,12 +696,7 @@ async function importRows(rows: string[][], sourceLabel: string) {
     return
   }
 
-  const response = await fetch(`${apiBaseUrl}/api/items/import`, {
-    method: 'POST',
-    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items: importedItems })
-  })
-  if (!response.ok) throw new Error('匯入失敗')
+  await importItems(token.value, importedItems)
   await loadItems()
 }
 
@@ -829,22 +759,15 @@ function existingImageFileList(images: TestImage[]): UploadFileInfo[] {
 
 async function login() {
   loginError.value = ''
-  const response = await fetch(`${apiBaseUrl}/api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: passwordInput.value })
-  })
-
-  if (!response.ok) {
+  try {
+    const nextToken = await loginRequest(passwordInput.value)
+    token.value = nextToken
+    localStorage.setItem('pre-online-token', nextToken)
+    passwordInput.value = ''
+    await loadItems()
+  } catch {
     loginError.value = '密碼錯誤'
-    return
   }
-
-  const data = (await response.json()) as { token: string }
-  token.value = data.token
-  localStorage.setItem('pre-online-token', data.token)
-  passwordInput.value = ''
-  await loadItems()
 }
 
 function logout() {
@@ -858,16 +781,12 @@ async function loadItems() {
   error.value = ''
 
   try {
-    const response = await fetch(`${apiBaseUrl}/api/items`, {
-      headers: authHeaders()
-    })
-    if (response.status === 401) {
+    items.value = await fetchItems(token.value)
+  } catch (err) {
+    if (err instanceof UnauthorizedError) {
       logout()
       return
     }
-    if (!response.ok) throw new Error('讀取測試清單失敗')
-    items.value = await response.json()
-  } catch (err) {
     error.value = err instanceof Error ? err.message : '發生未知錯誤'
   } finally {
     loading.value = false
@@ -974,16 +893,8 @@ async function saveItem() {
   saving.value = true
   error.value = ''
 
-  const url = form.id ? `${apiBaseUrl}/api/items/${form.id}` : `${apiBaseUrl}/api/items`
-  const method = form.id ? 'PUT' : 'POST'
-
   try {
-    const response = await fetch(url, {
-      method,
-      headers: authHeaders(),
-      body: buildFormData()
-    })
-    if (!response.ok) throw new Error('儲存失敗')
+    await saveItemRequest(token.value, form.id, buildFormData())
     await loadItems()
     closeItemModal()
   } catch (err) {
@@ -1008,12 +919,8 @@ async function updateStatus(item: TestItem, status: Status) {
   data.set('tester', item.tester)
   data.set('note', item.note)
 
-  const response = await fetch(`${apiBaseUrl}/api/items/${item.id}`, {
-    method: 'PUT',
-    headers: authHeaders(),
-    body: data
-  })
-  if (response.ok) await loadItems()
+  await updateItem(token.value, item.id, data)
+  await loadItems()
 }
 
 function handleStatusChange(item: TestItem, value: string | number) {
@@ -1026,11 +933,8 @@ async function deleteItem(item: TestItem) {
   const confirmed = window.confirm(`刪除「${item.title}」？`)
   if (!confirmed) return
 
-  const response = await fetch(`${apiBaseUrl}/api/items/${item.id}`, {
-    method: 'DELETE',
-    headers: authHeaders()
-  })
-  if (response.ok) await loadItems()
+  await deleteItemRequest(token.value, item.id)
+  await loadItems()
 }
 
 async function deleteAllItems() {
@@ -1044,11 +948,7 @@ async function deleteAllItems() {
   error.value = ''
 
   try {
-    const response = await fetch(`${apiBaseUrl}/api/items/all`, {
-      method: 'DELETE',
-      headers: authHeaders()
-    })
-    if (!response.ok) throw new Error('刪除所有資料失敗')
+    await deleteAllItemsRequest(token.value)
     detailItem.value = null
     closeItemModal()
     closeSettings()

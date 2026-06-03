@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-
-type Environment = 'SIT' | 'UAT' | 'Online'
-type Status = '未測試' | 'Pass' | 'Fail' | 'Fixed' | 'Retest'
-
-type TestItem = {
-  environment: Environment
-  status: Status
-}
+import type { Environment, TestItem } from '../types'
 
 const props = defineProps<{
   items: TestItem[]
