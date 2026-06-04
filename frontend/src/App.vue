@@ -24,6 +24,7 @@ import {
   statusOptions,
   xlsxHeaders
 } from './constants'
+import IssueReportsPage from './pages/IssueReportsPage.vue'
 import StatsPage from './pages/StatsPage.vue'
 import type { CategoryFilter, Environment, FormState, Priority, Status, StatusFilter, TestImage, TestItem } from './types'
 
@@ -31,7 +32,7 @@ const token = ref(localStorage.getItem('pre-online-token') ?? '')
 const passwordInput = ref('')
 const loginError = ref('')
 const activeEnvironment = ref<Environment>('SIT')
-const currentView = ref<'items' | 'stats'>('items')
+const currentView = ref<'items' | 'stats' | 'issues'>('items')
 const items = ref<TestItem[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -1060,6 +1061,9 @@ onMounted(loadItems)
               <n-button :type="currentView === 'stats' ? 'primary' : 'default'" secondary @click="currentView = 'stats'">
                 統計資訊
               </n-button>
+              <n-button :type="currentView === 'issues' ? 'primary' : 'default'" secondary @click="currentView = 'issues'">
+                問題提報
+              </n-button>
             </n-button-group>
             <n-button secondary @click="settingsOpen = true">設定</n-button>
             <n-button secondary @click="logout">登出</n-button>
@@ -1103,6 +1107,15 @@ onMounted(loadItems)
           :environments="environments"
           :active-environment="activeEnvironment"
           @open-environment="openEnvironment"
+        />
+
+        <IssueReportsPage
+          v-else-if="currentView === 'issues'"
+          :token="token"
+          :environments="environments"
+          :active-environment="activeEnvironment"
+          @open-environment="activeEnvironment = $event"
+          @unauthorized="logout"
         />
 
         <section v-else class="workspace">

@@ -60,6 +60,18 @@ db.run(`
     UNIQUE(item_id, path)
   )
 `)
+db.run(`
+  CREATE TABLE IF NOT EXISTS issue_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    environment TEXT NOT NULL CHECK(environment IN ('SIT', 'UAT', 'Online')),
+    issue_description TEXT NOT NULL DEFAULT '',
+    reported_at TEXT NOT NULL DEFAULT '',
+    vendor_response TEXT NOT NULL DEFAULT '',
+    responded_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`)
 
 function tableColumns(table: string) {
   return new Set(db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all().map((column) => column.name))
@@ -154,6 +166,17 @@ type TestItemImage = {
   created_at: string
 }
 
+type IssueReport = {
+  id: number
+  environment: 'SIT' | 'UAT' | 'Online'
+  issue_description: string
+  reported_at: string
+  vendor_response: string
+  responded_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 const environmentSet = new Set<string>(['SIT', 'UAT', 'Online'])
 
 const environmentSchema = t.Union([t.Literal('SIT'), t.Literal('UAT'), t.Literal('Online')])
@@ -167,6 +190,7 @@ const statusSchema = t.Union([
 ])
 const prioritySchema = t.Union([t.Literal('P0'), t.Literal('P1'), t.Literal('P2'), t.Literal('P3')])
 const itemIdParamsSchema = t.Object({ id: t.Numeric() })
+const recordIdParamsSchema = t.Object({ id: t.Numeric() })
 const itemInputSchema = {
   environment: environmentSchema,
   module: t.Optional(t.String()),
@@ -192,9 +216,18 @@ const updateItemBodySchema = t.Partial(createItemBodySchema)
 const importItemsBodySchema = t.Object({
   items: t.Array(t.Object(itemInputSchema))
 })
+const issueReportBodySchema = t.Object({
+  environment: environmentSchema,
+  issue_description: t.String({ minLength: 1 }),
+  reported_at: t.String({ minLength: 1 }),
+  vendor_response: t.Optional(t.String()),
+  responded_at: t.Optional(t.Nullable(t.String()))
+})
+const updateIssueReportBodySchema = t.Partial(issueReportBodySchema)
 
 type ItemInput = Partial<Omit<Static<typeof createItemBodySchema>, 'image' | 'images' | 'retained_image_ids'>>
 type ItemPayload = Static<typeof createItemBodySchema> | Static<typeof updateItemBodySchema>
+type IssueReportInput = Static<typeof issueReportBodySchema> | Static<typeof updateIssueReportBodySchema>
 
 function corsHeaders() {
   return {
@@ -239,6 +272,21 @@ function normalizeInput(input: ItemInput, partial = false) {
     status: itemStatus ?? (partial ? undefined : '未測試'),
     tester: input.tester?.trim() ?? (partial ? undefined : ''),
     note: input.note?.trim() ?? (partial ? undefined : '')
+  }
+}
+
+function normalizeIssueReportInput(input: IssueReportInput, partial = false) {
+  const issueDescription = input.issue_description?.trim()
+  const reportedAt = input.reported_at?.trim()
+  const hasRespondedAt = Object.prototype.hasOwnProperty.call(input, 'responded_at')
+  const respondedAt = typeof input.responded_at === 'string' ? input.responded_at.trim() || null : null
+
+  return {
+    environment: input.environment?.trim(),
+    issue_description: issueDescription ?? (partial ? undefined : ''),
+    reported_at: reportedAt ?? (partial ? undefined : ''),
+    vendor_response: input.vendor_response?.trim() ?? (partial ? undefined : ''),
+    responded_at: hasRespondedAt ? respondedAt : partial ? undefined : null
   }
 }
 
@@ -552,6 +600,87 @@ const app = new Elysia()
           },
           {
             params: itemIdParamsSchema
+          }
+        )
+    )
+  )
+  .group('/api/issue-reports', (reports) =>
+    reports.guard({ beforeHandle: requireAuth }, (reports) =>
+      reports
+        .get('/', () => {
+          return db
+            .query<IssueReport, []>('SELECT * FROM issue_reports ORDER BY reported_at DESC, id DESC')
+            .all()
+        })
+        .post(
+          '/',
+          ({ body }) => {
+            const input = normalizeIssueReportInput(body)
+            const result = db
+              .query(
+                `INSERT INTO issue_reports
+                  (environment, issue_description, reported_at, vendor_response, responded_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+              )
+              .run(
+                input.environment!,
+                input.issue_description!,
+                input.reported_at!,
+                input.vendor_response!,
+                input.responded_at ?? null
+              )
+
+            return db.query<IssueReport, [number]>('SELECT * FROM issue_reports WHERE id = ?').get(Number(result.lastInsertRowid))
+          },
+          {
+            body: issueReportBodySchema
+          }
+        )
+        .put(
+          '/:id',
+          ({ params, body }) => {
+            const existing = db.query<IssueReport, [number]>('SELECT * FROM issue_reports WHERE id = ?').get(params.id)
+            if (!existing) {
+              return status(404, 'Not found')
+            }
+
+            const input = normalizeIssueReportInput(body, true)
+            const respondedAt = Object.prototype.hasOwnProperty.call(body, 'responded_at')
+              ? (input.responded_at ?? null)
+              : existing.responded_at
+            db.query(
+              `UPDATE issue_reports SET
+                environment = ?,
+                issue_description = ?,
+                reported_at = ?,
+                vendor_response = ?,
+                responded_at = ?,
+                updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?`
+            ).run(
+              input.environment ?? existing.environment,
+              input.issue_description ?? existing.issue_description,
+              input.reported_at ?? existing.reported_at,
+              input.vendor_response ?? existing.vendor_response,
+              respondedAt,
+              params.id
+            )
+
+            return db.query<IssueReport, [number]>('SELECT * FROM issue_reports WHERE id = ?').get(params.id)
+          },
+          {
+            params: recordIdParamsSchema,
+            body: updateIssueReportBodySchema
+          }
+        )
+        .delete(
+          '/:id',
+          ({ params }) => {
+            db.query('DELETE FROM issue_reports WHERE id = ?').run(params.id)
+            return { ok: true }
+          },
+          {
+            params: recordIdParamsSchema
           }
         )
     )

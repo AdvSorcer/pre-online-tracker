@@ -1,4 +1,4 @@
-import type { TestItem } from './types'
+import type { IssueReport, IssueReportInput, TestItem } from './types'
 
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -95,4 +95,32 @@ export async function deleteAllItems(token: string) {
     headers: authHeaders(token)
   })
   if (!response.ok) throw new Error('刪除所有資料失敗')
+}
+
+export async function fetchIssueReports(token: string) {
+  const response = await fetch(`${apiBaseUrl}/api/issue-reports`, {
+    headers: authHeaders(token)
+  })
+  if (response.status === 401) throw new UnauthorizedError()
+  if (!response.ok) throw new Error('讀取問題紀錄失敗')
+  return (await response.json()) as IssueReport[]
+}
+
+export async function saveIssueReport(token: string, reportId: number | null, data: IssueReportInput) {
+  const url = reportId ? `${apiBaseUrl}/api/issue-reports/${reportId}` : `${apiBaseUrl}/api/issue-reports`
+  const method = reportId ? 'PUT' : 'POST'
+  const response = await fetch(url, {
+    method,
+    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+  if (!response.ok) throw new Error('儲存問題紀錄失敗')
+}
+
+export async function deleteIssueReport(token: string, reportId: number) {
+  const response = await fetch(`${apiBaseUrl}/api/issue-reports/${reportId}`, {
+    method: 'DELETE',
+    headers: authHeaders(token)
+  })
+  if (!response.ok) throw new Error('刪除問題紀錄失敗')
 }

@@ -4,6 +4,25 @@ export type StatusFilter = Status | 'all'
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3'
 export type CategoryFilter = string | 'all'
 
+export type IssueReport = {
+  id: number
+  environment: Environment
+  issue_description: string
+  reported_at: string
+  vendor_response: string
+  responded_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type IssueReportInput = {
+  environment: Environment
+  issue_description: string
+  reported_at: string
+  vendor_response: string
+  responded_at: string | null
+}
+
 export type TestImage = {
   id: number
   item_id: number
