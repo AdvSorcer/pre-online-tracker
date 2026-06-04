@@ -1,5 +1,5 @@
 export type Environment = 'SIT' | 'UAT' | 'Online'
-export type Status = '未測試' | 'Pass' | 'Fail' | 'Fixed' | 'Retest'
+export type Status = '未測試' | 'Pending' | 'Pass' | 'Fail' | 'Fixed' | 'Retest'
 export type StatusFilter = Status | 'all'
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3'
 export type CategoryFilter = string | 'all'

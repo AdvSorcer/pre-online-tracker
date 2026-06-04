@@ -19,17 +19,20 @@ const stats = computed(() =>
     const fail = scoped.filter((item) => item.status === 'Fail').length
     const fixed = scoped.filter((item) => item.status === 'Fixed').length
     const retest = scoped.filter((item) => item.status === 'Retest').length
+    const pending = scoped.filter((item) => item.status === 'Pending').length
     const untested = scoped.filter((item) => item.status === '未測試').length
     const completed = pass + fail + fixed + retest
     const rate = scoped.length === 0 ? 0 : Math.round((completed / scoped.length) * 100)
-    return { environment, total: scoped.length, pass, fail, fixed, retest, untested, rate }
+    return { environment, total: scoped.length, pass, fail, fixed, retest, pending, untested, rate }
   })
 )
 
 const overallStats = computed(() => {
+  const pending = props.items.filter((item) => item.status === 'Pending').length
   const untested = props.items.filter((item) => item.status === '未測試').length
   return {
-    tested: props.items.length - untested,
+    tested: props.items.length - pending - untested,
+    pending,
     untested
   }
 })
@@ -46,6 +49,10 @@ const overallStats = computed(() => {
       <n-card class="summary-card">
         <span>已測試項目</span>
         <strong>{{ overallStats.tested }}</strong>
+      </n-card>
+      <n-card class="summary-card">
+        <span>待確認</span>
+        <strong>{{ overallStats.pending }}</strong>
       </n-card>
       <n-card class="summary-card">
         <span>尚未測試</span>
@@ -67,7 +74,7 @@ const overallStats = computed(() => {
           <strong>{{ stat.rate }}%</strong>
           <small>
             總數 {{ stat.total }} / Pass {{ stat.pass }} / Fail {{ stat.fail }} / Fixed {{ stat.fixed }} /
-            Retest {{ stat.retest }} / 未測試 {{ stat.untested }}
+            Retest {{ stat.retest }} / Pending {{ stat.pending }} / 未測試 {{ stat.untested }}
           </small>
         </n-space>
       </n-card>

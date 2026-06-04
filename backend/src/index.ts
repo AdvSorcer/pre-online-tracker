@@ -27,7 +27,7 @@ db.run(`
     scenario TEXT NOT NULL DEFAULT '',
     test_method TEXT NOT NULL DEFAULT '',
     expected_result TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT '未測試' CHECK(status IN ('未測試', 'Pass', 'Fail', 'Fixed', 'Retest')),
+    status TEXT NOT NULL DEFAULT '未測試' CHECK(status IN ('未測試', 'Pending', 'Pass', 'Fail', 'Fixed', 'Retest')),
     tester TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
     image_path TEXT,
@@ -80,7 +80,7 @@ for (const [column, sql] of migrations) {
 const itemTableSql =
   db.query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'test_items'").get()?.sql ??
   ''
-if (!itemTableSql.includes("'Fixed'") || !itemTableSql.includes("'Retest'")) {
+if (!itemTableSql.includes("'Fixed'") || !itemTableSql.includes("'Retest'") || !itemTableSql.includes("'Pending'")) {
   db.run('PRAGMA foreign_keys = OFF')
   db.transaction(() => {
     db.run(`
@@ -96,7 +96,7 @@ if (!itemTableSql.includes("'Fixed'") || !itemTableSql.includes("'Retest'")) {
         scenario TEXT NOT NULL DEFAULT '',
         test_method TEXT NOT NULL DEFAULT '',
         expected_result TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT '未測試' CHECK(status IN ('未測試', 'Pass', 'Fail', 'Fixed', 'Retest')),
+        status TEXT NOT NULL DEFAULT '未測試' CHECK(status IN ('未測試', 'Pending', 'Pass', 'Fail', 'Fixed', 'Retest')),
         tester TEXT NOT NULL DEFAULT '',
         note TEXT NOT NULL DEFAULT '',
         image_path TEXT,
@@ -138,7 +138,7 @@ type TestItem = {
   scenario: string
   test_method: string
   expected_result: string
-  status: '未測試' | 'Pass' | 'Fail' | 'Fixed' | 'Retest'
+  status: '未測試' | 'Pending' | 'Pass' | 'Fail' | 'Fixed' | 'Retest'
   tester: string
   note: string
   image_path: string | null
@@ -159,6 +159,7 @@ const environmentSet = new Set<string>(['SIT', 'UAT', 'Online'])
 const environmentSchema = t.Union([t.Literal('SIT'), t.Literal('UAT'), t.Literal('Online')])
 const statusSchema = t.Union([
   t.Literal('未測試'),
+  t.Literal('Pending'),
   t.Literal('Pass'),
   t.Literal('Fail'),
   t.Literal('Fixed'),

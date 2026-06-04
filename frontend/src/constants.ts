@@ -1,7 +1,7 @@
 import type { Environment, Priority, Status } from './types'
 
 export const environments: Environment[] = ['SIT', 'UAT', 'Online']
-export const statuses: Status[] = ['未測試', 'Fail', 'Fixed', 'Retest', 'Pass']
+export const statuses: Status[] = ['未測試', 'Pending', 'Fail', 'Fixed', 'Retest', 'Pass']
 export const priorities: Priority[] = ['P0', 'P1', 'P2', 'P3']
 
 export const environmentOptions = environments.map((value) => ({ label: value, value }))

@@ -137,7 +137,7 @@ const filteredItems = computed(() => {
   )
 })
 const sortedItems = computed(() => {
-  const statusRank: Record<Status, number> = { 未測試: 0, Fail: 1, Fixed: 2, Retest: 3, Pass: 4 }
+  const statusRank: Record<Status, number> = { 未測試: 0, Pending: 1, Fail: 2, Fixed: 3, Retest: 4, Pass: 5 }
   const priorityRank: Record<Priority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
   return [...filteredItems.value].sort((a, b) => {
     if (sortBy.value === 'priority') return priorityRank[a.priority] - priorityRank[b.priority] || a.sort_order - b.sort_order
@@ -972,7 +972,7 @@ function openEnvironment(environment: Environment) {
 function statusType(status: Status) {
   if (status === 'Pass') return 'success'
   if (status === 'Fail') return 'error'
-  if (status === 'Fixed' || status === 'Retest') return 'warning'
+  if (status === 'Pending' || status === 'Fixed' || status === 'Retest') return 'warning'
   return 'default'
 }
 
