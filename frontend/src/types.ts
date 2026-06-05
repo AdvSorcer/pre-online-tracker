@@ -3,12 +3,14 @@ export type Status = '未測試' | 'Pending' | 'Pass' | 'Fail' | 'Fixed' | 'Rete
 export type StatusFilter = Status | 'all'
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3'
 export type CategoryFilter = string | 'all'
+export type IssueResolutionStatus = '未解決' | '已解決'
 
 export type IssueReport = {
   id: number
   environment: Environment
   issue_description: string
   reported_at: string
+  resolution_status: IssueResolutionStatus
   vendor_response: string
   responded_at: string | null
   created_at: string
@@ -19,6 +21,7 @@ export type IssueReportInput = {
   environment: Environment
   issue_description: string
   reported_at: string
+  resolution_status: IssueResolutionStatus
   vendor_response: string
   responded_at: string | null
 }

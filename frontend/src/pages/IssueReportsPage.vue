@@ -7,7 +7,7 @@ import {
   saveIssueReport as saveIssueReportRequest
 } from '../api'
 import { environmentOptions } from '../constants'
-import type { Environment, IssueReport, IssueReportInput } from '../types'
+import type { Environment, IssueReport, IssueReportInput, IssueResolutionStatus } from '../types'
 
 const props = defineProps<{
   token: string
@@ -25,10 +25,22 @@ type IssueReportForm = {
   environment: Environment
   issue_description: string
   reported_at: string
+  resolution_status: IssueResolutionStatus
   vendor_response: string
   responded_at: string
 }
 type ResponseFilter = 'all' | 'unanswered'
+type ResolutionFilter = IssueResolutionStatus | 'all'
+
+const issueResolutionStatusOptions = [
+  { label: '未解決', value: '未解決' },
+  { label: '已解決', value: '已解決' }
+] as const
+
+const resolutionFilterOptions = [
+  { label: '全部解決狀態', value: 'all' },
+  ...issueResolutionStatusOptions
+] as const
 
 const responseFilterOptions = [
   { label: '全部回覆狀態', value: 'all' },
@@ -42,6 +54,7 @@ const emptyForm = (): IssueReportForm => ({
   environment: props.activeEnvironment,
   issue_description: '',
   reported_at: today(),
+  resolution_status: '未解決',
   vendor_response: '',
   responded_at: ''
 })
@@ -53,15 +66,21 @@ const formOpen = ref(false)
 const error = ref('')
 const searchKeyword = ref('')
 const responseFilter = ref<ResponseFilter>('all')
+const resolutionFilter = ref<ResolutionFilter>('all')
 const form = reactive<IssueReportForm>(emptyForm())
 
 const environmentReports = computed(() =>
   reports.value.filter((report) => report.environment === props.activeEnvironment)
 )
-const responseFilteredReports = computed(() => {
-  if (responseFilter.value === 'all') return environmentReports.value
+const resolutionFilteredReports = computed(() => {
+  if (resolutionFilter.value === 'all') return environmentReports.value
 
-  return environmentReports.value.filter(
+  return environmentReports.value.filter((report) => report.resolution_status === resolutionFilter.value)
+})
+const responseFilteredReports = computed(() => {
+  if (responseFilter.value === 'all') return resolutionFilteredReports.value
+
+  return resolutionFilteredReports.value.filter(
     (report) => !report.vendor_response.trim() && !report.responded_at
   )
 })
@@ -70,7 +89,13 @@ const filteredReports = computed(() => {
   if (!normalizedSearchKeyword.value) return responseFilteredReports.value
 
   return responseFilteredReports.value.filter((report) =>
-    [report.issue_description, report.vendor_response, report.reported_at, report.responded_at ?? '']
+    [
+      report.issue_description,
+      report.resolution_status,
+      report.vendor_response,
+      report.reported_at,
+      report.responded_at ?? ''
+    ]
       .join(' ')
       .toLowerCase()
       .includes(normalizedSearchKeyword.value)
@@ -94,6 +119,7 @@ function editReport(report: IssueReport) {
     environment: report.environment,
     issue_description: report.issue_description,
     reported_at: report.reported_at,
+    resolution_status: report.resolution_status,
     vendor_response: report.vendor_response,
     responded_at: report.responded_at ?? ''
   })
@@ -110,6 +136,7 @@ function reportPayload(): IssueReportInput {
     environment: form.environment,
     issue_description: form.issue_description,
     reported_at: form.reported_at,
+    resolution_status: form.resolution_status,
     vendor_response: form.vendor_response,
     responded_at: form.responded_at || null
   }
@@ -174,6 +201,7 @@ watch(
   () => {
     searchKeyword.value = ''
     responseFilter.value = 'all'
+    resolutionFilter.value = 'all'
     if (!formOpen.value) resetForm()
   }
 )
@@ -199,6 +227,7 @@ onMounted(loadReports)
             </n-button>
           </n-button-group>
           <n-input v-model:value="searchKeyword" clearable class="search-input" placeholder="搜尋問題或回覆" />
+          <n-select v-model:value="resolutionFilter" :options="resolutionFilterOptions" class="status-filter" />
           <n-select v-model:value="responseFilter" :options="responseFilterOptions" class="status-filter" />
           <n-button type="primary" @click="openCreateReport">新增問題紀錄</n-button>
           <n-button secondary :loading="loading" @click="loadReports">重新整理</n-button>
@@ -214,6 +243,7 @@ onMounted(loadReports)
               <th>環境</th>
               <th>問題描述</th>
               <th>提報日期</th>
+              <th>狀態</th>
               <th>廠商回覆</th>
               <th>回覆日期</th>
               <th>操作</th>
@@ -224,6 +254,11 @@ onMounted(loadReports)
               <td>{{ report.environment }}</td>
               <td class="issue-description-cell">{{ report.issue_description }}</td>
               <td>{{ report.reported_at }}</td>
+              <td>
+                <n-tag :type="report.resolution_status === '已解決' ? 'success' : 'warning'">
+                  {{ report.resolution_status }}
+                </n-tag>
+              </td>
               <td class="issue-response-cell">{{ report.vendor_response || '-' }}</td>
               <td>{{ report.responded_at || '-' }}</td>
               <td>
@@ -234,7 +269,7 @@ onMounted(loadReports)
               </td>
             </tr>
             <tr v-if="filteredReports.length === 0">
-              <td colspan="6" class="empty-state">
+              <td colspan="7" class="empty-state">
                 {{ environmentReports.length === 0 ? '尚無問題紀錄' : '找不到符合篩選條件的問題紀錄' }}
               </td>
             </tr>
@@ -253,6 +288,10 @@ onMounted(loadReports)
             <input v-model="form.reported_at" class="native-date-input" type="date" />
           </n-form-item-gi>
         </n-grid>
+
+        <n-form-item label="狀態">
+          <n-select v-model:value="form.resolution_status" :options="issueResolutionStatusOptions" />
+        </n-form-item>
 
         <n-form-item label="問題描述">
           <n-input

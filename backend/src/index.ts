@@ -66,6 +66,7 @@ db.run(`
     environment TEXT NOT NULL CHECK(environment IN ('SIT', 'UAT', 'Online')),
     issue_description TEXT NOT NULL DEFAULT '',
     reported_at TEXT NOT NULL DEFAULT '',
+    resolution_status TEXT NOT NULL DEFAULT '未解決' CHECK(resolution_status IN ('未解決', '已解決')),
     vendor_response TEXT NOT NULL DEFAULT '',
     responded_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -87,6 +88,11 @@ const migrations = [
 ] as const
 for (const [column, sql] of migrations) {
   if (!itemColumns.has(column)) db.run(sql)
+}
+
+const issueColumns = tableColumns('issue_reports')
+if (!issueColumns.has('resolution_status')) {
+  db.run("ALTER TABLE issue_reports ADD COLUMN resolution_status TEXT NOT NULL DEFAULT '未解決' CHECK(resolution_status IN ('未解決', '已解決'))")
 }
 
 const itemTableSql =
@@ -171,6 +177,7 @@ type IssueReport = {
   environment: 'SIT' | 'UAT' | 'Online'
   issue_description: string
   reported_at: string
+  resolution_status: '未解決' | '已解決'
   vendor_response: string
   responded_at: string | null
   created_at: string
@@ -189,6 +196,7 @@ const statusSchema = t.Union([
   t.Literal('Retest')
 ])
 const prioritySchema = t.Union([t.Literal('P0'), t.Literal('P1'), t.Literal('P2'), t.Literal('P3')])
+const issueResolutionStatusSchema = t.Union([t.Literal('未解決'), t.Literal('已解決')])
 const itemIdParamsSchema = t.Object({ id: t.Numeric() })
 const recordIdParamsSchema = t.Object({ id: t.Numeric() })
 const itemInputSchema = {
@@ -220,6 +228,7 @@ const issueReportBodySchema = t.Object({
   environment: environmentSchema,
   issue_description: t.String({ minLength: 1 }),
   reported_at: t.String({ minLength: 1 }),
+  resolution_status: t.Optional(issueResolutionStatusSchema),
   vendor_response: t.Optional(t.String()),
   responded_at: t.Optional(t.Nullable(t.String()))
 })
@@ -278,6 +287,7 @@ function normalizeInput(input: ItemInput, partial = false) {
 function normalizeIssueReportInput(input: IssueReportInput, partial = false) {
   const issueDescription = input.issue_description?.trim()
   const reportedAt = input.reported_at?.trim()
+  const resolutionStatus = input.resolution_status?.trim()
   const hasRespondedAt = Object.prototype.hasOwnProperty.call(input, 'responded_at')
   const respondedAt = typeof input.responded_at === 'string' ? input.responded_at.trim() || null : null
 
@@ -285,6 +295,7 @@ function normalizeIssueReportInput(input: IssueReportInput, partial = false) {
     environment: input.environment?.trim(),
     issue_description: issueDescription ?? (partial ? undefined : ''),
     reported_at: reportedAt ?? (partial ? undefined : ''),
+    resolution_status: resolutionStatus ?? (partial ? undefined : '未解決'),
     vendor_response: input.vendor_response?.trim() ?? (partial ? undefined : ''),
     responded_at: hasRespondedAt ? respondedAt : partial ? undefined : null
   }
@@ -619,13 +630,14 @@ const app = new Elysia()
             const result = db
               .query(
                 `INSERT INTO issue_reports
-                  (environment, issue_description, reported_at, vendor_response, responded_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+                  (environment, issue_description, reported_at, resolution_status, vendor_response, responded_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
               )
               .run(
                 input.environment!,
                 input.issue_description!,
                 input.reported_at!,
+                input.resolution_status!,
                 input.vendor_response!,
                 input.responded_at ?? null
               )
@@ -653,6 +665,7 @@ const app = new Elysia()
                 environment = ?,
                 issue_description = ?,
                 reported_at = ?,
+                resolution_status = ?,
                 vendor_response = ?,
                 responded_at = ?,
                 updated_at = CURRENT_TIMESTAMP
@@ -661,6 +674,7 @@ const app = new Elysia()
               input.environment ?? existing.environment,
               input.issue_description ?? existing.issue_description,
               input.reported_at ?? existing.reported_at,
+              input.resolution_status ?? existing.resolution_status,
               input.vendor_response ?? existing.vendor_response,
               respondedAt,
               params.id
