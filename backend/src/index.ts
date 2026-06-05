@@ -233,6 +233,9 @@ const issueReportBodySchema = t.Object({
   responded_at: t.Optional(t.Nullable(t.String()))
 })
 const updateIssueReportBodySchema = t.Partial(issueReportBodySchema)
+const importIssueReportsBodySchema = t.Object({
+  reports: t.Array(issueReportBodySchema)
+})
 
 type ItemInput = Partial<Omit<Static<typeof createItemBodySchema>, 'image' | 'images' | 'retained_image_ids'>>
 type ItemPayload = Static<typeof createItemBodySchema> | Static<typeof updateItemBodySchema>
@@ -623,6 +626,36 @@ const app = new Elysia()
             .query<IssueReport, []>('SELECT * FROM issue_reports ORDER BY reported_at DESC, id DESC')
             .all()
         })
+        .post(
+          '/import',
+          ({ body }) => {
+            const insert = db.query(
+              `INSERT INTO issue_reports
+                (environment, issue_description, reported_at, resolution_status, vendor_response, responded_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+            )
+            let imported = 0
+            db.transaction(() => {
+              for (const rawReport of body.reports) {
+                const input = normalizeIssueReportInput(rawReport)
+                insert.run(
+                  input.environment!,
+                  input.issue_description!,
+                  input.reported_at!,
+                  input.resolution_status!,
+                  input.vendor_response!,
+                  input.responded_at ?? null
+                )
+                imported += 1
+              }
+            })()
+
+            return { imported }
+          },
+          {
+            body: importIssueReportsBodySchema
+          }
+        )
         .post(
           '/',
           ({ body }) => {

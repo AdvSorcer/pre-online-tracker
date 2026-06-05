@@ -4,9 +4,11 @@ import {
   UnauthorizedError,
   deleteIssueReport as deleteIssueReportRequest,
   fetchIssueReports,
+  importIssueReports,
   saveIssueReport as saveIssueReportRequest
 } from '../api'
 import { environmentOptions } from '../constants'
+import { buildIssueReportsXlsxBlob, parseIssueReportsXlsx } from '../issueReportWorkbook'
 import type { Environment, IssueReport, IssueReportInput, IssueResolutionStatus } from '../types'
 
 const props = defineProps<{
@@ -62,11 +64,13 @@ const emptyForm = (): IssueReportForm => ({
 const reports = ref<IssueReport[]>([])
 const loading = ref(false)
 const saving = ref(false)
+const importing = ref(false)
 const formOpen = ref(false)
 const error = ref('')
 const searchKeyword = ref('')
 const responseFilter = ref<ResponseFilter>('all')
 const resolutionFilter = ref<ResolutionFilter>('all')
+const importFileInput = ref<HTMLInputElement | null>(null)
 const form = reactive<IssueReportForm>(emptyForm())
 
 const environmentReports = computed(() =>
@@ -184,6 +188,51 @@ async function saveReport() {
   }
 }
 
+function triggerImport() {
+  importFileInput.value?.click()
+}
+
+async function handleImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!file.name.toLowerCase().endsWith('.xlsx')) {
+    error.value = '目前支援匯入 XLSX'
+    return
+  }
+
+  importing.value = true
+  error.value = ''
+
+  try {
+    const importedReports = await parseIssueReportsXlsx(file, props.activeEnvironment)
+    if (importedReports.length === 0) {
+      error.value = 'XLSX 找不到問題描述欄位或內容'
+      return
+    }
+    await importIssueReports(props.token, importedReports)
+    await loadReports()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '匯入問題紀錄失敗'
+  } finally {
+    importing.value = false
+  }
+}
+
+function exportXlsx() {
+  const blob = buildIssueReportsXlsxBlob(filteredReports.value, `${props.activeEnvironment} 問題提報紀錄`)
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  link.href = url
+  link.download = `${props.activeEnvironment}-問題提報紀錄-${date}.xlsx`
+  document.body.append(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 async function deleteReport(report: IssueReport) {
   const confirmed = window.confirm('刪除這筆問題紀錄？')
   if (!confirmed) return
@@ -230,8 +279,17 @@ onMounted(loadReports)
           <n-select v-model:value="resolutionFilter" :options="resolutionFilterOptions" class="status-filter" />
           <n-select v-model:value="responseFilter" :options="responseFilterOptions" class="status-filter" />
           <n-button type="primary" @click="openCreateReport">新增問題紀錄</n-button>
+          <n-button secondary :loading="importing" @click="triggerImport">匯入 XLSX</n-button>
+          <n-button secondary :disabled="filteredReports.length === 0" @click="exportXlsx">匯出 XLSX</n-button>
           <n-button secondary :loading="loading" @click="loadReports">重新整理</n-button>
         </n-space>
+        <input
+          ref="importFileInput"
+          class="file-input"
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          @change="handleImportFile"
+        />
       </template>
 
       <n-alert v-if="error" type="error" class="form-alert">{{ error }}</n-alert>

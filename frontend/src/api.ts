@@ -117,6 +117,15 @@ export async function saveIssueReport(token: string, reportId: number | null, da
   if (!response.ok) throw new Error('儲存問題紀錄失敗')
 }
 
+export async function importIssueReports(token: string, reports: IssueReportInput[]) {
+  const response = await fetch(`${apiBaseUrl}/api/issue-reports/import`, {
+    method: 'POST',
+    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reports })
+  })
+  if (!response.ok) throw new Error('匯入問題紀錄失敗')
+}
+
 export async function deleteIssueReport(token: string, reportId: number) {
   const response = await fetch(`${apiBaseUrl}/api/issue-reports/${reportId}`, {
     method: 'DELETE',
