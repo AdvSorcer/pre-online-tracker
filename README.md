@@ -5,7 +5,12 @@
 ## 功能
 
 - 進入系統前輸入簡易密碼，預設 `2026`
-- 測試項目可依 `SIT`、`UAT`、`Online` 分環境管理
+- **Issue 追蹤與管理**：全域 Issue 追蹤（自動生成編號如 `ISSUE-1`）
+  - 支援 `Feature (需求)`、`Bug (缺陷)`、`Task (任務)`（預設新增為 Feature）
+  - 支援優先級、預計完成日、指派人、標題與長內文描述
+  - 支援優先級（高 ➔ 低）與預計完成日排序（預設優先級高者優先）
+  - 關閉 (Closed) 之 Issue 自動自主列表隱藏並歸檔至「已關閉」抽屜，支援查看與重開
+- **測試清單**：測試項目可依 `SIT`、`UAT`、`Online` 分環境管理
 - 測試狀態流程：`未測試`、`Pending`、`Fail`、`Fixed`、`Retest`、`Pass`
 - 測試方式、預期結果、備註、測試人員欄位
 - 模組、優先級、負責人、排序欄位，支援篩選與排序
@@ -22,6 +27,13 @@
 - Database: SQLite
 - Runtime: Bun
 - Container: Docker Compose
+
+## 單元測試
+
+```bash
+cd backend
+bun test
+```
 
 ## Docker Compose 啟動
 
