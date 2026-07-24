@@ -25,6 +25,7 @@ import {
   xlsxHeaders
 } from './constants'
 import IssueReportsPage from './pages/IssueReportsPage.vue'
+import IssueTrackerPage from './pages/IssueTrackerPage.vue'
 import StatsPage from './pages/StatsPage.vue'
 import type { CategoryFilter, Environment, FormState, Priority, Status, StatusFilter, TestImage, TestItem } from './types'
 
@@ -32,7 +33,7 @@ const token = ref(localStorage.getItem('pre-online-token') ?? '')
 const passwordInput = ref('')
 const loginError = ref('')
 const activeEnvironment = ref<Environment>('SIT')
-const currentView = ref<'items' | 'stats' | 'issues'>('items')
+const currentView = ref<'items' | 'stats' | 'issues' | 'issue-tracker'>('issue-tracker')
 const items = ref<TestItem[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -1055,6 +1056,9 @@ onMounted(loadItems)
           </div>
           <n-space>
             <n-button-group>
+              <n-button :type="currentView === 'issue-tracker' ? 'primary' : 'default'" secondary @click="currentView = 'issue-tracker'">
+                Issue 追蹤
+              </n-button>
               <n-button :type="currentView === 'items' ? 'primary' : 'default'" secondary @click="currentView = 'items'">
                 測試清單
               </n-button>
@@ -1101,8 +1105,16 @@ onMounted(loadItems)
           </n-drawer-content>
         </n-drawer>
 
+        <IssueTrackerPage
+          v-if="currentView === 'issue-tracker'"
+          :token="token"
+          :environments="environments"
+          @select-environment="activeEnvironment = $event; currentView = 'items'"
+          @unauthorized="logout"
+        />
+
         <StatsPage
-          v-if="currentView === 'stats'"
+          v-else-if="currentView === 'stats'"
           :items="items"
           :environments="environments"
           :active-environment="activeEnvironment"

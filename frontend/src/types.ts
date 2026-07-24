@@ -69,3 +69,33 @@ export type FormState = {
   note: string
   images: File[]
 }
+
+export type IssueType = 'Bug' | 'Task' | 'Feature'
+export type IssueStatus = 'Open' | 'In Progress' | 'Fixed' | 'Closed'
+export type IssuePriority = 'Blocker' | 'High' | 'Medium' | 'Low'
+
+export type IssueItem = {
+  id: number
+  issue_key: string
+  title: string
+  description: string
+  type: IssueType
+  status: IssueStatus
+  priority: IssuePriority
+  assignee: string
+  due_date: string | null
+  related_test_item_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type IssueInput = {
+  title?: string
+  description?: string
+  type?: IssueType
+  status?: IssueStatus
+  priority?: IssuePriority
+  assignee?: string
+  due_date?: string | null
+  related_test_item_id?: number | null
+}

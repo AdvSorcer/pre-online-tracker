@@ -73,6 +73,24 @@ db.run(`
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )
 `)
+db.run(`
+  CREATE TABLE IF NOT EXISTS issues (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_key TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    type TEXT NOT NULL DEFAULT 'Bug' CHECK(type IN ('Bug', 'Task', 'Feature')),
+    status TEXT NOT NULL DEFAULT 'Open' CHECK(status IN ('Open', 'In Progress', 'Fixed', 'Closed')),
+    priority TEXT NOT NULL DEFAULT 'Medium' CHECK(priority IN ('Blocker', 'High', 'Medium', 'Low')),
+    assignee TEXT NOT NULL DEFAULT '',
+    reporter TEXT NOT NULL DEFAULT '',
+    due_date TEXT,
+    related_test_item_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(related_test_item_id) REFERENCES test_items(id) ON DELETE SET NULL
+  )
+`)
 
 function tableColumns(table: string) {
   return new Set(db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all().map((column) => column.name))
@@ -88,6 +106,11 @@ const migrations = [
 ] as const
 for (const [column, sql] of migrations) {
   if (!itemColumns.has(column)) db.run(sql)
+}
+
+const issueTableColumns = tableColumns('issues')
+if (!issueTableColumns.has('due_date')) {
+  db.run('ALTER TABLE issues ADD COLUMN due_date TEXT')
 }
 
 const issueColumns = tableColumns('issue_reports')
@@ -184,6 +207,22 @@ type IssueReport = {
   updated_at: string
 }
 
+export type IssueItem = {
+  id: number
+  issue_key: string
+  title: string
+  description: string
+  type: 'Bug' | 'Task' | 'Feature'
+  status: 'Open' | 'In Progress' | 'Fixed' | 'Closed'
+  priority: 'Blocker' | 'High' | 'Medium' | 'Low'
+  assignee: string
+  reporter: string
+  due_date: string | null
+  related_test_item_id: number | null
+  created_at: string
+  updated_at: string
+}
+
 const environmentSet = new Set<string>(['SIT', 'UAT', 'Online'])
 
 const environmentSchema = t.Union([t.Literal('SIT'), t.Literal('UAT'), t.Literal('Online')])
@@ -197,6 +236,33 @@ const statusSchema = t.Union([
 ])
 const prioritySchema = t.Union([t.Literal('P0'), t.Literal('P1'), t.Literal('P2'), t.Literal('P3')])
 const issueResolutionStatusSchema = t.Union([t.Literal('未解決'), t.Literal('已解決')])
+
+const issueTypeSchema = t.Union([t.Literal('Bug'), t.Literal('Task'), t.Literal('Feature')])
+const issueStatusSchema = t.Union([
+  t.Literal('Open'),
+  t.Literal('In Progress'),
+  t.Literal('Fixed'),
+  t.Literal('Closed')
+])
+const issuePrioritySchema = t.Union([
+  t.Literal('Blocker'),
+  t.Literal('High'),
+  t.Literal('Medium'),
+  t.Literal('Low')
+])
+
+const createIssueBodySchema = t.Object({
+  title: t.String({ minLength: 1 }),
+  description: t.Optional(t.String()),
+  type: t.Optional(issueTypeSchema),
+  status: t.Optional(issueStatusSchema),
+  priority: t.Optional(issuePrioritySchema),
+  assignee: t.Optional(t.String()),
+  reporter: t.Optional(t.String()),
+  due_date: t.Optional(t.Nullable(t.String())),
+  related_test_item_id: t.Optional(t.Nullable(t.Number()))
+})
+const updateIssueBodySchema = t.Partial(createIssueBodySchema)
 const itemIdParamsSchema = t.Object({ id: t.Numeric() })
 const recordIdParamsSchema = t.Object({ id: t.Numeric() })
 const itemInputSchema = {
@@ -403,7 +469,7 @@ function mapItem(item: TestItem) {
   }
 }
 
-const app = new Elysia()
+export const app = new Elysia()
   .headers(corsHeaders())
   .onError(({ code }) => {
     if (code === 'VALIDATION') {
@@ -724,6 +790,117 @@ const app = new Elysia()
           '/:id',
           ({ params }) => {
             db.query('DELETE FROM issue_reports WHERE id = ?').run(params.id)
+            return { ok: true }
+          },
+          {
+            params: recordIdParamsSchema
+          }
+        )
+    )
+  )
+  .group('/api/issues', (issues) =>
+    issues.guard({ beforeHandle: requireAuth }, (issues) =>
+      issues
+        .get('/', ({ query }) => {
+          let sql = 'SELECT * FROM issues WHERE 1=1'
+          const params: (string | number)[] = []
+          if (query?.status) {
+            sql += ' AND status = ?'
+            params.push(query.status)
+          }
+          if (query?.type) {
+            sql += ' AND type = ?'
+            params.push(query.type)
+          }
+          if (query?.priority) {
+            sql += ' AND priority = ?'
+            params.push(query.priority)
+          }
+          if (query?.search) {
+            sql += ' AND (title LIKE ? OR description LIKE ? OR issue_key LIKE ? OR assignee LIKE ? OR reporter LIKE ?)'
+            const kw = `%${query.search.trim()}%`
+            params.push(kw, kw, kw, kw, kw)
+          }
+          sql += ' ORDER BY id DESC'
+          return db.query<IssueItem, (string | number)[]>(sql).all(...params)
+        })
+        .post(
+          '/',
+          ({ body }) => {
+            const title = body.title.trim()
+            const description = body.description?.trim() ?? ''
+            const type = body.type ?? 'Feature'
+            const statusVal = body.status ?? 'Open'
+            const priority = body.priority ?? 'Medium'
+            const assignee = body.assignee?.trim() ?? ''
+            const reporter = body.reporter?.trim() ?? ''
+            const dueDate = body.due_date?.trim() || null
+            const relatedTestItemId = body.related_test_item_id ?? null
+
+            const dummyKey = `TMP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+            const result = db
+              .query(
+                `INSERT INTO issues (issue_key, title, description, type, status, priority, assignee, reporter, due_date, related_test_item_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+              )
+              .run(dummyKey, title, description, type, statusVal, priority, assignee, reporter, dueDate, relatedTestItemId)
+
+            const newId = Number(result.lastInsertRowid)
+            const issueKey = `ISSUE-${newId}`
+            db.query('UPDATE issues SET issue_key = ? WHERE id = ?').run(issueKey, newId)
+
+            return db.query<IssueItem, [number]>('SELECT * FROM issues WHERE id = ?').get(newId)!
+          },
+          {
+            body: createIssueBodySchema
+          }
+        )
+        .put(
+          '/:id',
+          ({ params, body }) => {
+            const existing = db.query<IssueItem, [number]>('SELECT * FROM issues WHERE id = ?').get(params.id)
+            if (!existing) return status(404, 'Issue not found')
+
+            const title = body.title !== undefined ? body.title.trim() : existing.title
+            const description = body.description !== undefined ? body.description.trim() : existing.description
+            const type = body.type ?? existing.type
+            const statusVal = body.status ?? existing.status
+            const priority = body.priority ?? existing.priority
+            const assignee = body.assignee !== undefined ? body.assignee.trim() : existing.assignee
+            const reporter = body.reporter !== undefined ? body.reporter.trim() : existing.reporter
+            const dueDate = body.due_date !== undefined ? (body.due_date?.trim() || null) : existing.due_date
+            const relatedTestItemId =
+              body.related_test_item_id !== undefined ? body.related_test_item_id : existing.related_test_item_id
+
+            db.query(
+              `UPDATE issues SET
+                 title = ?,
+                 description = ?,
+                 type = ?,
+                 status = ?,
+                 priority = ?,
+                 assignee = ?,
+                 reporter = ?,
+                 due_date = ?,
+                 related_test_item_id = ?,
+                 updated_at = CURRENT_TIMESTAMP
+               WHERE id = ?`
+            ).run(title, description, type, statusVal, priority, assignee, reporter, dueDate, relatedTestItemId, params.id)
+
+            return db.query<IssueItem, [number]>('SELECT * FROM issues WHERE id = ?').get(params.id)!
+          },
+          {
+            params: recordIdParamsSchema,
+            body: updateIssueBodySchema
+          }
+        )
+        .delete(
+          '/:id',
+          ({ params }) => {
+            const existing = db.query<IssueItem, [number]>('SELECT * FROM issues WHERE id = ?').get(params.id)
+            if (!existing) return status(404, 'Issue not found')
+
+            db.query('DELETE FROM issues WHERE id = ?').run(params.id)
             return { ok: true }
           },
           {

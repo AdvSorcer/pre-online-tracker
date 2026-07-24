@@ -1,4 +1,4 @@
-import type { IssueReport, IssueReportInput, TestItem } from './types'
+import type { IssueInput, IssueItem, IssueReport, IssueReportInput, TestItem } from './types'
 
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -133,3 +133,41 @@ export async function deleteIssueReport(token: string, reportId: number) {
   })
   if (!response.ok) throw new Error('刪除問題紀錄失敗')
 }
+
+export async function fetchIssues(token: string, params?: { status?: string; type?: string; priority?: string; search?: string }) {
+  const url = new URL(`${apiBaseUrl}/api/issues`, window.location.origin)
+  if (params?.status) url.searchParams.set('status', params.status)
+  if (params?.type) url.searchParams.set('type', params.type)
+  if (params?.priority) url.searchParams.set('priority', params.priority)
+  if (params?.search) url.searchParams.set('search', params.search)
+
+  const response = await fetch(url.toString(), {
+    headers: authHeaders(token)
+  })
+  if (response.status === 401) throw new UnauthorizedError()
+  if (!response.ok) throw new Error('讀取 Issue 列表失敗')
+  return (await response.json()) as IssueItem[]
+}
+
+export async function saveIssue(token: string, issueId: number | null, data: IssueInput) {
+  const url = issueId ? `${apiBaseUrl}/api/issues/${issueId}` : `${apiBaseUrl}/api/issues`
+  const method = issueId ? 'PUT' : 'POST'
+  const response = await fetch(url, {
+    method,
+    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+  if (response.status === 401) throw new UnauthorizedError()
+  if (!response.ok) throw new Error('儲存 Issue 失敗')
+  return (await response.json()) as IssueItem
+}
+
+export async function deleteIssue(token: string, issueId: number) {
+  const response = await fetch(`${apiBaseUrl}/api/issues/${issueId}`, {
+    method: 'DELETE',
+    headers: authHeaders(token)
+  })
+  if (response.status === 401) throw new UnauthorizedError()
+  if (!response.ok) throw new Error('刪除 Issue 失敗')
+}
+
