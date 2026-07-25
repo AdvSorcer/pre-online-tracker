@@ -15,6 +15,13 @@ body {
   min-width: 320px;
   margin: 0;
   background: #eef2f5;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+html.dark,
+html.dark body {
+  color: #ffffffd9;
+  background: #101014;
 }
 
 h1,

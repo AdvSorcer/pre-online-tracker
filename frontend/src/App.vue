@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SelectRenderLabel, UploadFileInfo } from 'naive-ui'
+import { darkTheme, type SelectRenderLabel, type UploadFileInfo } from 'naive-ui'
 import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import {
   UnauthorizedError,
@@ -32,6 +32,21 @@ import StatsPage from './pages/StatsPage.vue'
 import type { CategoryFilter, Environment, FormState, Priority, Status, StatusFilter, TestImage, TestItem } from './types'
 
 const token = ref(localStorage.getItem('pre-online-token') ?? '')
+const isDark = ref(localStorage.getItem('pre-online-theme') === 'dark')
+
+watch(
+  isDark,
+  (val) => {
+    localStorage.setItem('pre-online-theme', val ? 'dark' : 'light')
+    if (val) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+  },
+  { immediate: true }
+)
+
 const passwordInput = ref('')
 const loginError = ref('')
 const activeEnvironment = ref<Environment>('SIT')
@@ -1067,7 +1082,7 @@ onMounted(loadItems)
 </script>
 
 <template>
-  <n-config-provider>
+  <n-config-provider :theme="isDark ? darkTheme : null">
     <n-message-provider>
       <main v-if="!token" class="login-shell">
         <n-card class="login-panel" :bordered="false">
@@ -1113,6 +1128,9 @@ onMounted(loadItems)
                 統計資訊
               </n-button>
             </n-button-group>
+            <n-button secondary @click="isDark = !isDark">
+              {{ isDark ? '☀️ 亮色' : '🌙 深色' }}
+            </n-button>
             <n-button secondary @click="settingsOpen = true">設定</n-button>
             <n-button secondary @click="logout">登出</n-button>
           </n-space>
