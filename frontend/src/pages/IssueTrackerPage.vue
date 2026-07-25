@@ -18,7 +18,8 @@ import {
   NTag
 } from 'naive-ui'
 import { computed, onMounted, reactive, ref } from 'vue'
-import { UnauthorizedError, deleteIssue, fetchIssues, saveIssue } from '../api'
+import { UnauthorizedError, deleteIssue, fetchIssues, importIssues, saveIssue } from '../api'
+import { buildIssuesXlsxBlob, parseIssuesXlsx } from '../issueWorkbook'
 import type { Environment, IssueInput, IssueItem, IssuePriority, IssueStatus, IssueType } from '../types'
 
 const props = defineProps<{
@@ -34,6 +35,7 @@ const emit = defineEmits<{
 const issues = ref<IssueItem[]>([])
 const loading = ref(false)
 const saving = ref(false)
+const importing = ref(false)
 const formOpen = ref(false)
 const closedDrawerOpen = ref(false)
 const error = ref('')
@@ -41,6 +43,7 @@ const searchKeyword = ref('')
 const typeFilter = ref<string>('all')
 const statusFilter = ref<string>('all')
 const priorityFilter = ref<string>('all')
+const importFileInput = ref<HTMLInputElement | null>(null)
 
 type SortByOption = 'priority_desc' | 'priority_asc' | 'due_date_asc' | 'due_date_desc' | 'id_desc'
 const sortBy = ref<SortByOption>('priority_desc')
@@ -208,6 +211,47 @@ async function loadIssues() {
   }
 }
 
+function exportToExcel() {
+  if (issues.value.length === 0) {
+    error.value = '沒有可匯出的 Issue'
+    return
+  }
+  const blob = buildIssuesXlsxBlob(sortedIssues.value)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `issues_${new Date().toISOString().slice(0, 10)}.xlsx`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function triggerImportFile() {
+  importFileInput.value?.click()
+}
+
+async function handleImportFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  importing.value = true
+  error.value = ''
+  try {
+    const parsedIssues = await parseIssuesXlsx(file)
+    const res = await importIssues(props.token, parsedIssues)
+    await loadIssues()
+  } catch (err) {
+    if (err instanceof UnauthorizedError) {
+      emit('unauthorized')
+      return
+    }
+    error.value = err instanceof Error ? err.message : '匯入失敗'
+  } finally {
+    importing.value = false
+    input.value = ''
+  }
+}
+
 function openCreateModal() {
   Object.assign(form, initialForm())
   formOpen.value = true
@@ -353,7 +397,18 @@ onMounted(() => {
       <template #header>
         <div class="header-toolbar">
           <h2>Issue 追蹤與管理</h2>
-          <n-button type="primary" @click="openCreateModal">+ 新增 Issue</n-button>
+          <n-space>
+            <n-button secondary @click="exportToExcel">匯出 Excel</n-button>
+            <n-button secondary :loading="importing" @click="triggerImportFile">匯入 Excel</n-button>
+            <n-button type="primary" @click="openCreateModal">+ 新增 Issue</n-button>
+            <input
+              ref="importFileInput"
+              type="file"
+              accept=".xlsx,.csv"
+              style="display: none;"
+              @change="handleImportFileChange"
+            />
+          </n-space>
         </div>
       </template>
 

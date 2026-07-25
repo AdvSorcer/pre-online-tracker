@@ -4,8 +4,10 @@ import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import {
   UnauthorizedError,
   apiBaseUrl,
+  deleteAllIssues as deleteAllIssuesRequest,
   deleteAllItems as deleteAllItemsRequest,
   deleteItem as deleteItemRequest,
+  fetchIssues,
   fetchItems,
   importItems,
   login as loginRequest,
@@ -1006,10 +1008,52 @@ watch(sortBy, () => {
   currentPage.value = 1
 })
 
+const totalIssuesCount = ref(0)
+const deletingAllIssues = ref(false)
+const deleteAllIssuesConfirmText = ref('')
+const issueTrackerKey = ref(0)
+
+const canDeleteAllIssues = computed(() => {
+  return totalIssuesCount.value > 0 && deleteAllIssuesConfirmText.value.trim().toUpperCase() === 'DELETE'
+})
+
+async function loadIssuesCount() {
+  if (!token.value) return
+  try {
+    const list = await fetchIssues(token.value)
+    totalIssuesCount.value = list.length
+  } catch {
+    // Ignore count error
+  }
+}
+
+async function deleteAllIssues() {
+  if (!canDeleteAllIssues.value) return
+  deletingAllIssues.value = true
+  settingsError.value = ''
+  try {
+    await deleteAllIssuesRequest(token.value)
+    deleteAllIssuesConfirmText.value = ''
+    await loadIssuesCount()
+    issueTrackerKey.value += 1
+  } catch (err) {
+    if (err instanceof UnauthorizedError) {
+      logout()
+      return
+    }
+    settingsError.value = err instanceof Error ? err.message : '清空 Issue 失敗'
+  } finally {
+    deletingAllIssues.value = false
+  }
+}
+
 watch(settingsOpen, (open) => {
   if (!open) {
     settingsError.value = ''
     deleteAllConfirmText.value = ''
+    deleteAllIssuesConfirmText.value = ''
+  } else {
+    loadIssuesCount()
   }
 })
 
@@ -1062,11 +1106,11 @@ onMounted(loadItems)
               <n-button :type="currentView === 'items' ? 'primary' : 'default'" secondary @click="currentView = 'items'">
                 測試清單
               </n-button>
-              <n-button :type="currentView === 'stats' ? 'primary' : 'default'" secondary @click="currentView = 'stats'">
-                統計資訊
-              </n-button>
               <n-button :type="currentView === 'issues' ? 'primary' : 'default'" secondary @click="currentView = 'issues'">
                 問題提報
+              </n-button>
+              <n-button :type="currentView === 'stats' ? 'primary' : 'default'" secondary @click="currentView = 'stats'">
+                統計資訊
               </n-button>
             </n-button-group>
             <n-button secondary @click="settingsOpen = true">設定</n-button>
@@ -1098,7 +1142,30 @@ onMounted(loadItems)
                   :loading="deletingAll"
                   @click="deleteAllItems"
                 >
-                  刪除所有資料
+                  清空測試案例
+                </n-button>
+              </section>
+
+              <section class="settings-section">
+                <h2>Issue 資料管理</h2>
+                <p>目前共有 {{ totalIssuesCount }} 筆 Issue 資料。清空後會抹除所有 Issue 紀錄（含已關閉項目）。</p>
+
+                <n-form-item label="輸入 DELETE 確認清空 Issue">
+                  <n-input
+                    v-model:value="deleteAllIssuesConfirmText"
+                    placeholder="DELETE"
+                    :disabled="totalIssuesCount === 0 || deletingAllIssues"
+                  />
+                </n-form-item>
+
+                <n-button
+                  type="error"
+                  block
+                  :disabled="!canDeleteAllIssues"
+                  :loading="deletingAllIssues"
+                  @click="deleteAllIssues"
+                >
+                  清空所有 Issue 資料
                 </n-button>
               </section>
             </n-space>
@@ -1107,6 +1174,7 @@ onMounted(loadItems)
 
         <IssueTrackerPage
           v-if="currentView === 'issue-tracker'"
+          :key="issueTrackerKey"
           :token="token"
           :environments="environments"
           @select-environment="activeEnvironment = $event; currentView = 'items'"

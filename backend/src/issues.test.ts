@@ -141,4 +141,47 @@ describe('Issue Tracker API', () => {
     )
     expect(updateRes.status).toBe(404)
   })
+
+  it('should batch import issues successfully', async () => {
+    const importData = {
+      issues: [
+        { title: '匯入需求 A', type: 'Feature', priority: 'High', status: 'Open' },
+        { title: '匯入缺陷 B', type: 'Bug', priority: 'Blocker', status: 'In Progress' }
+      ]
+    }
+
+    const response = await app.handle(
+      new Request('http://localhost/api/issues/import', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeader
+        },
+        body: JSON.stringify(importData)
+      })
+    )
+
+    expect(response.status).toBe(200)
+    const result = await response.json()
+    expect(result.imported).toBe(2)
+  })
+
+  it('should delete all issues successfully', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/issues/all', {
+        method: 'DELETE',
+        headers: authHeader
+      })
+    )
+    expect(response.status).toBe(200)
+
+    const listRes = await app.handle(
+      new Request('http://localhost/api/issues', {
+        method: 'GET',
+        headers: authHeader
+      })
+    )
+    const issues = await listRes.json()
+    expect(issues.length).toBe(0)
+  })
 })

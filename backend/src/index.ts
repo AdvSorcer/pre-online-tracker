@@ -263,6 +263,9 @@ const createIssueBodySchema = t.Object({
   related_test_item_id: t.Optional(t.Nullable(t.Number()))
 })
 const updateIssueBodySchema = t.Partial(createIssueBodySchema)
+const importIssuesBodySchema = t.Object({
+  issues: t.Array(createIssueBodySchema)
+})
 const itemIdParamsSchema = t.Object({ id: t.Numeric() })
 const recordIdParamsSchema = t.Object({ id: t.Numeric() })
 const itemInputSchema = {
@@ -855,6 +858,44 @@ export const app = new Elysia()
             body: createIssueBodySchema
           }
         )
+        .post(
+          '/import',
+          ({ body }) => {
+            const insert = db.query(
+              `INSERT INTO issues (issue_key, title, description, type, status, priority, assignee, reporter, due_date, related_test_item_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+            )
+            const updateKey = db.query('UPDATE issues SET issue_key = ? WHERE id = ?')
+            let imported = 0
+
+            db.transaction(() => {
+              for (const item of body.issues) {
+                const title = item.title.trim()
+                if (!title) continue
+
+                const description = item.description?.trim() ?? ''
+                const type = item.type ?? 'Feature'
+                const statusVal = item.status ?? 'Open'
+                const priority = item.priority ?? 'Medium'
+                const assignee = item.assignee?.trim() ?? ''
+                const reporter = item.reporter?.trim() ?? ''
+                const dueDate = item.due_date?.trim() || null
+                const relatedTestItemId = item.related_test_item_id ?? null
+
+                const dummyKey = `TMP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+                const result = insert.run(dummyKey, title, description, type, statusVal, priority, assignee, reporter, dueDate, relatedTestItemId)
+                const newId = Number(result.lastInsertRowid)
+                updateKey.run(`ISSUE-${newId}`, newId)
+                imported += 1
+              }
+            })()
+
+            return { imported }
+          },
+          {
+            body: importIssuesBodySchema
+          }
+        )
         .put(
           '/:id',
           ({ params, body }) => {
@@ -894,6 +935,11 @@ export const app = new Elysia()
             body: updateIssueBodySchema
           }
         )
+        .delete('/all', () => {
+          db.query('DELETE FROM issues').run()
+          db.query("DELETE FROM sqlite_sequence WHERE name = 'issues'").run()
+          return { ok: true }
+        })
         .delete(
           '/:id',
           ({ params }) => {

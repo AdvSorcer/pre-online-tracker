@@ -171,3 +171,23 @@ export async function deleteIssue(token: string, issueId: number) {
   if (!response.ok) throw new Error('刪除 Issue 失敗')
 }
 
+export async function importIssues(token: string, issues: IssueInput[]) {
+  const response = await fetch(`${apiBaseUrl}/api/issues/import`, {
+    method: 'POST',
+    headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ issues })
+  })
+  if (response.status === 401) throw new UnauthorizedError()
+  if (!response.ok) throw new Error('匯入 Issue 失敗')
+  return (await response.json()) as { imported: number }
+}
+
+export async function deleteAllIssues(token: string) {
+  const response = await fetch(`${apiBaseUrl}/api/issues/all`, {
+    method: 'DELETE',
+    headers: authHeaders(token)
+  })
+  if (response.status === 401) throw new UnauthorizedError()
+  if (!response.ok) throw new Error('清空 Issue 失敗')
+}
+
